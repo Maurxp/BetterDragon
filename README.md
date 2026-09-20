@@ -24,7 +24,7 @@
 ---
 
 ## Documentación Oficial
-- 📖 [Especificación de Comportamiento (BEHAVIOR_SPEC.md)](docs/BEHAVIOR_SPEC.md)
-- 🏛️ [Arquitectura del Sistema (ARCHITECTURE.md)](docs/ARCHITECTURE.md)
-- 🗺️ [Plan de Implementación Vivo (IMPLEMENTATION.md)](docs/IMPLEMENTATION.md)
-- 🔬 [Referencias de Investigación (RESEARCH.md)](docs/RESEARCH.md)
+- 📖 [Especificación de Comportamiento](docs/BEHAVIOR_SPEC.md)
+- 🏛️ [Arquitectura del Sistema](docs/ARCHITECTURE.md)
+- 🗺️ [Plan de Implementación Vivo](docs/IMPLEMENTATION.md)
+- 🔬 [Referencias de Investigación](docs/RESEARCH.md)
