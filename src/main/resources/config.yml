@@ -1,0 +1,22 @@
+# ==============================================================================
+# BETTERDRAGON — CONFIGURACIÓN PRODUCTIVA BASE
+# Versión: 0.1.0-SNAPSHOT
+# Autor: maurxp
+# ==============================================================================
+
+# Control del portal de salida de bedrock
+portal:
+  # Cuando portal.enabled es false:
+  # BetterDragon NO crea, NO modifica, NO restaura y NO administra el portal
+  # de salida de bedrock vanilla en la arena del End.
+  # Cuando portal.enabled es true:
+  # BetterDragon permite la gestión del portal central tras la victoria.
+  enabled: false
+
+# Opciones de logging y depuración
+logging:
+  # Nivel de detalle en consola: INFO, WARNING, SEVERE
+  level: "INFO"
+  # Habilitar mensajes de diagnóstico detallados de combate
+  debug: false
+

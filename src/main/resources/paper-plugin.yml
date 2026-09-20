@@ -1,0 +1,7 @@
+name: BetterDragon
+version: 0.1.0-SNAPSHOT
+main: maurxp.betterdragon.BetterDragonPlugin
+api-version: '26.1.2'
+author: maurxp
+description: Enterprise-grade Dragon Battle Management Plugin for Paper 26.1.2
+prefix: BetterDragon

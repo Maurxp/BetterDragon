@@ -1,0 +1,295 @@
+package maurxp.betterdragon.battle;
+
+import maurxp.betterdragon.battle.model.BattleAbortReason;
+import maurxp.betterdragon.battle.model.BattleId;
+import maurxp.betterdragon.battle.model.BattleResult;
+import maurxp.betterdragon.battle.model.BattleState;
+import maurxp.betterdragon.battle.model.DragonIdentity;
+import maurxp.betterdragon.combat.CombatRuntime;
+import maurxp.betterdragon.config.BattleConfigurationSnapshot;
+
+import java.time.Instant;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
+
+/**
+ * Representa el estado mutable en tiempo de ejecución de una batalla de
+ * BetterDragon.
+ * <p>
+ * Principios de diseño:
+ * <ul>
+ * <li><b>Main-Thread Confinement:</b> Vive exclusivamente en el hilo principal
+ * del servidor,
+ * sin necesidad de sincronización concurrente interna (sin locks ni
+ * Atomic*).</li>
+ * <li><b>Protección de Invariantes:</b> Las transiciones de estado solo se
+ * realizan a través
+ * de métodos de dominio explícitos que validan la máquina de estados.</li>
+ * <li><b>Snapshot Inmutable:</b> Almacena un
+ * {@link BattleConfigurationSnapshot} inmutable
+ * que congela los parámetros de la batalla; recargas posteriores del plugin no
+ * afectan la sesión.</li>
+ * <li><b>Aislamiento de Persistencia:</b> No almacena referencias a entidades
+ * Bukkit vivas
+ * ({@code EnderDragon} o {@code Player}) ni a objetos {@code World},
+ * permitiendo
+ * recuperación y serialización limpia.</li>
+ * <li><b>Combat Runtime Aislado:</b> Cada sesión posee su propia instancia de
+ * {@link CombatRuntime},
+ * garantizando aislamiento total entre batallas sin singletons globales.</li>
+ * </ul>
+ *
+ * @author maurxp
+ */
+public class BattleSession {
+
+    private final BattleId battleId;
+    private final String worldName;
+    private final UUID worldUniqueId;
+    private final BattleConfigurationSnapshot configSnapshot;
+    private final Instant createdAt;
+    private final CombatRuntime combatRuntime;
+
+    private BattleState state;
+    private DragonIdentity dragonIdentity;
+    private Instant activatedAt;
+    private Instant completedAt;
+    private BattleState stateBeforeChunkDeferral;
+
+    public BattleSession(BattleId battleId, String worldName, UUID worldUniqueId,
+            BattleConfigurationSnapshot configSnapshot) {
+        this.battleId = Objects.requireNonNull(battleId, "El battleId no puede ser nulo");
+        this.worldName = Objects.requireNonNull(worldName, "El worldName no puede ser nulo");
+        this.worldUniqueId = Objects.requireNonNull(worldUniqueId, "El worldUniqueId no puede ser nulo");
+        this.configSnapshot = Objects.requireNonNull(configSnapshot, "El configSnapshot no puede ser nulo");
+        this.createdAt = Instant.now();
+        this.state = BattleState.IDLE;
+        this.combatRuntime = new CombatRuntime(this);
+    }
+
+    public BattleSession(BattleId battleId, String worldName, UUID worldUniqueId) {
+        this(battleId, worldName, worldUniqueId, BattleConfigurationSnapshot.defaults());
+    }
+
+    /**
+     * Fábrica para crear una nueva sesión de batalla en estado IDLE con snapshot
+     * congelado.
+     *
+     * @param battleId       identificador único
+     * @param worldName      nombre del mundo
+     * @param worldUniqueId  UUID del mundo
+     * @param configSnapshot instantánea inmutable de configuración
+     * @return nueva sesión en estado IDLE
+     */
+    public static BattleSession create(BattleId battleId, String worldName, UUID worldUniqueId,
+            BattleConfigurationSnapshot configSnapshot) {
+        return new BattleSession(battleId, worldName, worldUniqueId, configSnapshot);
+    }
+
+    /**
+     * Fábrica para crear una nueva sesión de batalla en estado IDLE con
+     * configuración por defecto.
+     *
+     * @param battleId      identificador único
+     * @param worldName     nombre del mundo
+     * @param worldUniqueId UUID del mundo
+     * @return nueva sesión en estado IDLE
+     */
+    public static BattleSession create(BattleId battleId, String worldName, UUID worldUniqueId) {
+        return new BattleSession(battleId, worldName, worldUniqueId, BattleConfigurationSnapshot.defaults());
+    }
+
+    /**
+     * Inicia la fase de preparación de la batalla.
+     * Transición: IDLE -> PREPARING.
+     */
+    public void start() {
+        transitionTo(BattleState.PREPARING);
+    }
+
+    /**
+     * Activa el combate una vez que la entidad del dragón ha sido generada o
+     * vinculada.
+     * Transición: PREPARING -> ACTIVE.
+     *
+     * @param dragonIdentity identidad inmutable del dragón asignado
+     * @throws IllegalArgumentException si la identidad no pertenece a esta batalla
+     */
+    public void activate(DragonIdentity dragonIdentity) {
+        Objects.requireNonNull(dragonIdentity, "La identidad del dragón no puede ser nula al activar la batalla");
+        if (!dragonIdentity.battleId().equals(this.battleId)) {
+            throw new IllegalArgumentException("El DragonIdentity pertenece a una batalla distinta: "
+                    + dragonIdentity.battleId() + " (esperado: " + this.battleId + ")");
+        }
+
+        transitionTo(BattleState.ACTIVE);
+        this.dragonIdentity = dragonIdentity;
+        this.activatedAt = Instant.now();
+    }
+
+    /**
+     * Marca el inicio del proceso de muerte del dragón al llegar a 0 de salud.
+     * Transición: ACTIVE -> DYING.
+     */
+    public void beginDying() {
+        transitionTo(BattleState.DYING);
+    }
+
+    /**
+     * Concluye la batalla con victoria y genera el resultado inmutable final.
+     * Transición: DYING -> COMPLETED.
+     *
+     * @param slayerUniqueId      UUID del Slayer (TOP_DAMAGE)
+     * @param slayerLastKnownName snapshot del nombre del Slayer
+     * @return resultado inmutable de la batalla
+     */
+    public BattleResult complete(UUID slayerUniqueId, String slayerLastKnownName) {
+        transitionTo(BattleState.COMPLETED);
+        this.completedAt = Instant.now();
+
+        return BattleResult.completed(
+                this.battleId,
+                this.activatedAt != null ? this.activatedAt : this.createdAt,
+                this.completedAt,
+                slayerUniqueId,
+                slayerLastKnownName);
+    }
+
+    /**
+     * Cancela o aborta la batalla por un motivo tipado de dominio.
+     * Transición: cualquier estado operativo -> ABORTED.
+     *
+     * @param reason razón tipada de la cancelación
+     * @return resultado inmutable de la batalla abortada
+     */
+    public BattleResult abort(BattleAbortReason reason) {
+        Objects.requireNonNull(reason, "La razón de aborto no puede ser nula");
+        return abort(reason.name());
+    }
+
+    /**
+     * Cancela o aborta la batalla por una condición no recuperable o intervención
+     * administrativa.
+     * Transición: cualquier estado operativo -> ABORTED.
+     *
+     * @param reason motivo de la cancelación
+     * @return resultado inmutable de la batalla abortada
+     */
+    public BattleResult abort(String reason) {
+        transitionTo(BattleState.ABORTED);
+        this.completedAt = Instant.now();
+
+        return BattleResult.aborted(
+                this.battleId,
+                this.activatedAt != null ? this.activatedAt : this.createdAt,
+                this.completedAt,
+                reason);
+    }
+
+    /**
+     * Pausa la batalla debido a la descarga del chunk del dragón.
+     * Transición: ACTIVE o DYING -> DEFERRED_PENDING_CHUNK_LOAD.
+     */
+    public void deferPendingChunkLoad() {
+        if (this.state != BattleState.ACTIVE && this.state != BattleState.DYING) {
+            throw new IllegalStateException(
+                    "Solo batallas en ACTIVE o DYING pueden pausarse por descarga de chunk. Estado actual: "
+                            + this.state);
+        }
+        this.stateBeforeChunkDeferral = this.state;
+        transitionTo(BattleState.DEFERRED_PENDING_CHUNK_LOAD);
+    }
+
+    /**
+     * Reanuda la batalla una vez que el chunk ha vuelto a ser cargado.
+     * Transición: DEFERRED_PENDING_CHUNK_LOAD -> ACTIVE o DYING.
+     */
+    public void resumeFromChunkLoad() {
+        if (this.state != BattleState.DEFERRED_PENDING_CHUNK_LOAD) {
+            throw new IllegalStateException("La sesión no está en estado DEFERRED_PENDING_CHUNK_LOAD: " + this.state);
+        }
+        BattleState targetState = this.stateBeforeChunkDeferral != null ? this.stateBeforeChunkDeferral
+                : BattleState.ACTIVE;
+        this.stateBeforeChunkDeferral = null;
+        transitionTo(targetState);
+    }
+
+    private void transitionTo(BattleState next) {
+        this.state.validateTransition(next);
+        this.state = next;
+    }
+
+    // --- Consultas de Estado ---
+
+    public BattleId getBattleId() {
+        return battleId;
+    }
+
+    public String getWorldName() {
+        return worldName;
+    }
+
+    public UUID getWorldUniqueId() {
+        return worldUniqueId;
+    }
+
+    public BattleState getState() {
+        return state;
+    }
+
+    public Optional<DragonIdentity> getDragonIdentity() {
+        return Optional.ofNullable(dragonIdentity);
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Optional<Instant> getActivatedAt() {
+        return Optional.ofNullable(activatedAt);
+    }
+
+    public Optional<Instant> getCompletedAt() {
+        return Optional.ofNullable(completedAt);
+    }
+
+    public boolean isActive() {
+        return state == BattleState.ACTIVE;
+    }
+
+    public boolean isTerminal() {
+        return state.isTerminal();
+    }
+
+    /**
+     * Retorna el estado operativo que tenía la sesión antes de entrar en
+     * DEFERRED_PENDING_CHUNK_LOAD.
+     *
+     * @return Optional con el estado previo (ACTIVE o DYING), o empty si no está
+     *         pausada por chunk
+     */
+    public Optional<BattleState> getStateBeforeChunkDeferral() {
+        return Optional.ofNullable(stateBeforeChunkDeferral);
+    }
+
+    /**
+     * Retorna la instantánea de configuración congelada para esta sesión de
+     * batalla.
+     *
+     * @return snapshot inmutable de configuración
+     */
+    public BattleConfigurationSnapshot getConfigSnapshot() {
+        return configSnapshot;
+    }
+
+    /**
+     * Retorna el runtime de combate asociado exclusivamente a esta sesión de
+     * batalla.
+     *
+     * @return runtime de combate activo
+     */
+    public CombatRuntime getCombatRuntime() {
+        return combatRuntime;
+    }
+}
