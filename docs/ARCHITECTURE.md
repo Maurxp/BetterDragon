@@ -236,7 +236,67 @@ El participante con mayor daño acumulado se determina mediante:
 Garantiza un resultado determinista idéntico e independiente del orden de iteración de `HashMap`.
 
 ### 6.5 Deuda Técnica de Identidad (Registrada de 3.3-R1)
-> 3.3-R1 mantiene `definitionId` y `schemaVersion` fuera del PDC efectivo. `DragonIdentity` todavía contiene defaults heredados de la arquitectura inicial (`"default"`, `1`). Esta deuda se resolverá cuando `DragonDefinition` y `schemaVersion` sean conceptos reales del dominio en fases posteriores. Combat Runtime depende exclusivamente de `BattleId`, `UUID`, sesión y datos de participación.
+> 3.3-R1 mantiene `definitionId` y `schemaVersion` fuera del PDC efectivo. `DragonIdentity` todavía contiene defaults heredados de la arquitectura inicial (`"default"`, `1`). En Fase 3.5, `DragonDefinition` se introduce formalmente en la capa de configuración tipada y snapshot inmutable (`BattleConfigurationSnapshot`), asociando fases y habilidades sin escribir aún en el PDC físico.
 
+---
 
+## 7. Combat Phases & Abilities (Phase 3.5)
 
+### 7.1 Topología Modular y Desacoplamiento de Runtime
+Para preservar la modularidad y evitar un God Object, el flujo de ejecución de fases y habilidades se estructura en capas unidireccionales estrictamente segregadas:
+
+```
+BattleSession
+    │
+    ├──► CombatRuntime (Participantes, Daño de jugadores, TOP_DAMAGE)
+    │
+    └──► PhaseRuntime (Monitoreo de vida, Fases ordenadas, Monotonicidad)
+           │
+           └──► AbilityEngine (Triggers, Cooldowns lógicos)
+                  │
+                  ├──► TargetSelector (Entidades válidas en arena)
+                  ├──► LocationResolver (Orígenes espaciales en mundo)
+                  │
+                  └──► AbilityEffect (0% NMS: DAMAGE, KNOCKBACK, PARTICLE, SOUND)
+```
+
+### Reglas de Desacoplamiento:
+1. **`PhaseRuntime` NO registra daño:** El cálculo de daño y la tabla de clasificación pertenecen exclusivamente a `CombatRuntime`.
+2. **`AbilityEngine` NO gestiona estado de batalla:** No decide transiciones de ciclo de vida (`DYING`, `COMPLETED`, `ABORTED`), ni interactúa con bases de datos SQLite o inventarios de recompensas.
+3. **Aislamiento de Daño Dragon -> Jugador:** El daño producido por las habilidades del dragón a jugadores (`DamageEffect`) se despacha vía `player.damage(amount, dragon)` y **jamás** se registra en `CombatRuntime` (evitando feedback loops).
+
+### 7.2 Progresión Monotónica y Semántica de Thresholds
+- **Cálculo Robusto de Health Ratio:**
+  $$\text{ratio} = \text{clamp}\left(\frac{\text{currentHealth}}{\text{maxHealth}}, 0.0, 1.0\right)$$
+  Protección matemática absoluta contra divisiones por cero (`maxHealth <= 0`), valores negativos, `NaN` y `Infinity`.
+- **Invariante de Monotonicidad Estricta:**
+  La progresión de fases es unidireccional ($\text{Phase}_1 \to \text{Phase}_2 \to \text{Phase}_3 \to \dots$). Si el dragón es curado por cristales del End y su vida asciende superando umbrales anteriores, la batalla **permanece en la fase alcanzada**.
+- **Salto Determinista de Fases:**
+  Si un impacto masivo reduce la vida del dragón de 100% a 20%, el sistema avanza deterministamente en un solo tick hasta la fase correspondiente más avanzada sin transiciones erráticas ni bucles.
+
+### 7.3 Motor de Habilidades y Cooldowns Lógicos
+- **Ticks Lógicos:** Los cooldowns se evalúan en ticks del servidor (`nextAvailableTick = currentTick + cooldownTicks`), eliminando vulnerabilidades ante desfases de hora del sistema.
+- **Aislamiento por Sesión:** Cada batalla posee su propio `AbilityCooldownTracker`; dos batallas concurrentes mantienen sus recargas completamente independientes.
+- **Política de Cooldown en Cambio de Fase:**
+  Al transicionar de fase:
+  1. Se descartan las recargas pendientes de la fase anterior (`reset()`).
+  2. Las habilidades de la nueva fase quedan disponibles inmediatamente según su configuración.
+  3. Las habilidades `ON_PHASE_ENTER` se ejecutan exactamente una vez tras el cambio de fase.
+
+### 7.4 Contexto Inmutable, Selectores y Resolutores
+- **`AbilityExecutionContext` (Inmutable y Efímero):** Captura el estado congelado en el tick de ejecución (`battleId`, `worldName`, `dragon`, `trigger`, `resolvedTargets`, `resolvedOrigin`, `executionTick`, `ability`, `phase`). Se descarta al concluir el tick.
+- **`TargetSelector` (Entidades, no Bloques):**
+  - `ALL_IN_ARENA`: Jugadores en el mundo dentro del radio de la arena (150 bloques) en modo supervivencia o aventura.
+  - `RANDOM_PLAYER`: Jugador válido mediante RNG encapsulado y determinista.
+  - `RANDOM_SUBSET`: Hasta N jugadores sin duplicados (o todos si hay menos de N).
+  - `NEAREST_PLAYER`: Jugador más cercano al origen con desempate determinista por `UUID.toString()`.
+  - `DAMAGER`: Jugador con `TOP_DAMAGE` consultado de `CombatRuntime`.
+  - `TRIGGERING_PLAYER`: Jugador causante del evento disparador.
+- **`LocationResolver` y `BattleSpatialContext` (0% NMS):**
+  Resuelve coordenadas espaciales precisas para `DRAGON_HEAD`, `DRAGON_BODY`, `TARGET_FEET`, `PODIUM_CENTER`, `ARENA_CENTER` y `TRIGGER_LOCATION` con fallbacks seguros que garantizan cero `NullPointerException`.
+  - `BattleSpatialContext`: Abstracción que separa semánticamente la ubicación del podium de salida (`PODIUM_CENTER`, nivel pedestal de bedrock) del centro de la arena de combate (`ARENA_CENTER`, altitud de combate), extensible para la Fase 3.6.
+- **Orden de Resolución Coherente (Origin -> Target):**
+  El origen se resuelve previo a la selección de objetivos (salvo `TARGET_FEET`), suministrando una referencia espacial exacta para `NEAREST_PLAYER` (ej. calculando distancia contra la cabeza del dragón para `DRAGON_HEAD`).
+- **Seguridad de Ejecución y Validación de Triggers:**
+  - El motor valida que el disparador invocado coincida estrictamente con `ability.trigger()` configurado, rechazando discrepancias de forma temprana.
+  - La ejecución de efectos captura exclusivamente `Exception`, permitiendo que errores graves de la JVM (`Error`, `OutOfMemoryError`) se propaguen adecuadamente.

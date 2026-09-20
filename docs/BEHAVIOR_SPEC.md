@@ -93,11 +93,53 @@ La batalla opera como una Máquina de Estados Finitos (FSM) confinada al hilo pr
 - **Subpartes y Proyectiles:**
   - Soporte transparente para impactos dirigidos a `EnderDragon` y a subpartes complejas (`EnderDragonPart`/`ComplexEntityPart`), resolviendo la entidad raíz.
   - Soporte de atacantes directos (`Player`) y proyectiles lanzados por jugadores (`ProjectileSource`).
-- **Fases y Habilidades:** Pospuestas a Fase 3.5+. `[PENDIENTE]`
+- **Fases y Habilidades:** Consolidadas en Fase 3.5. `[CONSOLIDADAS]`
 
 ---
 
-## 4. Recompensas, Claims y Persistencia
+## 4. Fases de Combate y Habilidades (Fase 3.5)
+
+- **Modelo de Fases Ordenadas:**
+  - Cada dragón posee una secuencia ordenada de fases (`PhaseDefinition`) con umbrales decrecientes de ratio de salud (`healthRatioThreshold`).
+  - La fase inicial se evalúa al spawnear/activar la batalla según la salud inicial del dragón.
+- **Invariante de Monotonicidad Estricta:**
+  - La progresión avanza exclusivamente hacia adelante ($\text{Fase } 1 \to \text{Fase } 2 \to \text{Fase } 3$).
+  - Si el dragón se cura (por ejemplo, mediante cristales del End) y su salud supera un umbral previo, la batalla **NO** retrocede.
+  - Si un golpe masivo reduce la vida del dragón saltando múltiples umbrales (ej. 100% a 20%), el sistema transiciona deterministamente hasta la fase final que corresponda.
+- **Evento de Cambio de Fase (`BetterDragonPhaseChangeEvent`):**
+  - Despachado informativamente al inicializar la primera fase (`previousPhase = null`) y en cada transición posterior.
+  - Es **estrictamente no cancelable** para prevenir corrupción o bifurcación de la máquina de estados.
+- **Triggers de Habilidades:**
+  - `ON_PHASE_ENTER`: Se ejecuta exactamente una vez al entrar a una fase (la fase inicial cuenta como entrada).
+  - `PERIODIC`: Se evalúa en el hilo principal durante el tick central de la sesión, sujeto a recargas en ticks lógicos.
+  - **Validación de Trigger:** Si se invoca una habilidad con un trigger distinto al declarado, la ejecución es rechazada de forma temprana y segura.
+- **Política de Cooldowns:**
+  - Medidos en ticks del servidor (`long`).
+  - Cada sesión de batalla mantiene su propio estado de cooldown sin singletons.
+  - Al cambiar de fase, las recargas de la fase previa se descartan (`reset()`) para que las habilidades de la nueva fase estén disponibles de inmediato.
+- **Selectores de Objetivos (Entidades):**
+  - `ALL_IN_ARENA`: Todos los jugadores conectados en el mundo dentro del radio de la arena (150 bloques), con vida > 0 y en supervivencia o aventura.
+  - `RANDOM_PLAYER`: Un jugador válido seleccionado con RNG encapsulado.
+  - `RANDOM_SUBSET`: Hasta N jugadores sin duplicados (o todos si la cantidad disponible es menor a N).
+  - `NEAREST_PLAYER`: Jugador más cercano a la coordenada de origen previamente resuelta (`resolvedOrigin`, ej. `DRAGON_HEAD`) con desempate determinista por UUID.
+  - `DAMAGER`: Jugador con mayor daño acumulado (`TOP_DAMAGE`) consultado de `CombatRuntime`.
+  - `TRIGGERING_PLAYER`: Jugador asociado al trigger (si existe).
+- **Orígenes de Efecto (0% NMS):**
+  - `DRAGON_HEAD`: Proyección frontal de la cabeza del dragón vía Bukkit API pública.
+  - `DRAGON_BODY`: Ubicación corporal de la entidad dragón.
+  - `TARGET_FEET`: Coordenadas a los pies del objetivo primario (con fallback seguro al dragón).
+  - `PODIUM_CENTER`: Ubicación central del pedestal/portal de bedrock en el End (Y=65.0) provista por `BattleSpatialContext`.
+  - `ARENA_CENTER`: Centro geométrico aéreo de la arena de combate (Y=100.0) provisto por `BattleSpatialContext`.
+  - `TRIGGER_LOCATION`: Coordenada del causante del trigger (con fallback seguro al dragón).
+- **Efectos Canónicos de Habilidades:**
+  - `DAMAGE`: Inflige daño directo al jugador vía `target.damage(amount, dragon)`. Aislado al 100% de `CombatRuntime` (no alimenta daño de jugadores hacia dragón).
+  - `KNOCKBACK`: Aplica impulsos vectoriales físicos moderados y acotados (`setVelocity`) sin NMS.
+  - `PARTICLE`: Genera partículas en el origen resuelto mediante `World#spawnParticle`.
+  - `SOUND`: Reproduce efectos de audio espacial en el origen resuelto mediante `World#playSound`.
+
+---
+
+## 5. Recompensas, Claims y Persistencia
 
 - **Recompensas:**
   - Recompensa exclusiva para el Slayer (`TOP_DAMAGE`).

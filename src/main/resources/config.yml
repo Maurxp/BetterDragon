@@ -20,3 +20,27 @@ logging:
   # Habilitar mensajes de diagnóstico detallados de combate
   debug: false
 
+# ==============================================================================
+# FASES DE COMBATE Y HABILIDADES (FASE 3.5)
+# ==============================================================================
+
+# Catálogo declarativo de habilidades disponibles para el dragón
+# Por defecto se provee un catálogo vacío sin moveset predeterminado
+abilities: {}
+
+# Definición de dragones y sus fases de combate ordenadas
+dragons:
+  default:
+    phases:
+      - id: "phase_1"
+        threshold: 1.00
+        abilities: []
+      - id: "phase_2"
+        threshold: 0.75
+        abilities: []
+      - id: "phase_3"
+        threshold: 0.50
+        abilities: []
+      - id: "phase_4"
+        threshold: 0.25
+        abilities: []

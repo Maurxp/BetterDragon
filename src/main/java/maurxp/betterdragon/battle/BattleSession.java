@@ -1,5 +1,6 @@
 package maurxp.betterdragon.battle;
 
+import maurxp.betterdragon.ability.AbilityEngine;
 import maurxp.betterdragon.battle.model.BattleAbortReason;
 import maurxp.betterdragon.battle.model.BattleId;
 import maurxp.betterdragon.battle.model.BattleResult;
@@ -7,6 +8,8 @@ import maurxp.betterdragon.battle.model.BattleState;
 import maurxp.betterdragon.battle.model.DragonIdentity;
 import maurxp.betterdragon.combat.CombatRuntime;
 import maurxp.betterdragon.config.BattleConfigurationSnapshot;
+import maurxp.betterdragon.phase.PhaseRuntime;
+import org.bukkit.entity.EnderDragon;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -50,6 +53,8 @@ public class BattleSession {
     private final BattleConfigurationSnapshot configSnapshot;
     private final Instant createdAt;
     private final CombatRuntime combatRuntime;
+    private final PhaseRuntime phaseRuntime;
+    private final AbilityEngine abilityEngine;
 
     private BattleState state;
     private DragonIdentity dragonIdentity;
@@ -66,6 +71,8 @@ public class BattleSession {
         this.createdAt = Instant.now();
         this.state = BattleState.IDLE;
         this.combatRuntime = new CombatRuntime(this);
+        this.abilityEngine = new AbilityEngine(configSnapshot.dragonDefinition().abilities(), null);
+        this.phaseRuntime = new PhaseRuntime(this, configSnapshot.dragonDefinition().phases(), this.abilityEngine, null);
     }
 
     public BattleSession(BattleId battleId, String worldName, UUID worldUniqueId) {
@@ -291,5 +298,36 @@ public class BattleSession {
      */
     public CombatRuntime getCombatRuntime() {
         return combatRuntime;
+    }
+
+    /**
+     * Retorna el runtime de fases asociado exclusivamente a esta sesión de batalla.
+     *
+     * @return runtime de fases activo
+     */
+    public PhaseRuntime getPhaseRuntime() {
+        return phaseRuntime;
+    }
+
+    /**
+     * Retorna el motor de habilidades asociado exclusivamente a esta sesión de batalla.
+     *
+     * @return motor de habilidades activo
+     */
+    public AbilityEngine getAbilityEngine() {
+        return abilityEngine;
+    }
+
+    /**
+     * Ejecuta el ciclo periódico de actualización de combate, fases y habilidades.
+     *
+     * @param currentTick tick lógico del servidor
+     * @param dragon      entidad física activa del dragón
+     */
+    public void tick(long currentTick, EnderDragon dragon) {
+        if (!isActive() || dragon == null || !dragon.isValid()) {
+            return;
+        }
+        this.phaseRuntime.tick(currentTick, dragon);
     }
 }

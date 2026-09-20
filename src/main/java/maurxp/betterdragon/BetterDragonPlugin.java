@@ -1,11 +1,14 @@
 package maurxp.betterdragon;
 
+import maurxp.betterdragon.ability.AbilityEngine;
+import maurxp.betterdragon.ability.AbilityTrigger;
 import maurxp.betterdragon.battle.BattleManager;
 import maurxp.betterdragon.battle.BattleSession;
 import maurxp.betterdragon.battle.BattleSessionManager;
 import maurxp.betterdragon.battle.DragonLifecycleListener;
 import maurxp.betterdragon.battle.DragonPdcHandler;
 import maurxp.betterdragon.battle.DragonSpawner;
+import maurxp.betterdragon.battle.model.BattleId;
 import maurxp.betterdragon.battle.model.BattleState;
 import maurxp.betterdragon.battle.model.DragonIdentity;
 import maurxp.betterdragon.combat.CombatRuntime;
@@ -13,6 +16,7 @@ import maurxp.betterdragon.combat.CombatSnapshot;
 import maurxp.betterdragon.combat.DragonCombatListener;
 import maurxp.betterdragon.combat.ParticipantSnapshot;
 import maurxp.betterdragon.config.ConfigurationService;
+import maurxp.betterdragon.phase.PhaseRuntime;
 import maurxp.betterdragon.platform.bossbar.BossBarWorldListener;
 import maurxp.betterdragon.platform.bossbar.VanillaBossBarController;
 import maurxp.betterdragon.platform.bossbar.VanillaBossBarControllerFactory;
@@ -103,6 +107,20 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
             getServer().getPluginManager().registerEvents(combatListener, this);
 
             getServer().getPluginManager().registerEvents(this, this);
+
+            // 8. Tarea periódica de evaluación de fases y habilidades (Hilo principal)
+            getServer().getScheduler().runTaskTimer(this, () -> {
+                long currentTick = Bukkit.getCurrentTick();
+                for (BattleSession session : sessionManager.getAllSessions().values()) {
+                    if (session.isActive() && session.getDragonIdentity().isPresent()) {
+                        UUID dragonUuid = session.getDragonIdentity().get().entityUniqueId();
+                        Entity entity = Bukkit.getEntity(dragonUuid);
+                        if (entity instanceof EnderDragon dragon && dragon.isValid()) {
+                            session.tick(currentTick, dragon);
+                        }
+                    }
+                }
+            }, 1L, 1L);
 
             long elapsed = System.currentTimeMillis() - startTime;
             getLogger().info("[BetterDragon] Bootstrap completado exitosamente en " + elapsed + " ms.");
@@ -215,6 +233,9 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
         } else if (cmd.equalsIgnoreCase("bd-test-combat")) {
             event.setCancelled(true);
             runCombatVerification(event.getSender());
+        } else if (cmd.equalsIgnoreCase("bd-test-phases")) {
+            event.setCancelled(true);
+            runPhasesVerification(event.getSender());
         }
     }
 
@@ -574,6 +595,168 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
             getLogger().log(Level.SEVERE,
                     "[COMBAT-TEST-ERROR] Excepción inesperada durante la verificación de combate: " + e.getMessage(),
                     e);
+        }
+    }
+
+    /**
+     * Ejecuta la suite de verificación runtime de Phases & Abilities (Fase 3.5).
+     */
+    private void runPhasesVerification(CommandSender sender) {
+        getLogger().info("==================================================");
+        getLogger().info("  INICIANDO VERIFICACIÓN DE PHASES & ABILITIES (3.5)");
+        getLogger().info("==================================================");
+
+        try {
+            World endWorld = null;
+            for (World w : Bukkit.getWorlds()) {
+                if (w.getEnvironment() == World.Environment.THE_END) {
+                    endWorld = w;
+                    break;
+                }
+            }
+
+            if (endWorld == null) {
+                getLogger().severe("[PHASES-TEST-FAIL] No se encontró ningún mundo THE_END cargado.");
+                return;
+            }
+
+            endWorld.getChunkAt(0, 0).load();
+            endWorld.addPluginChunkTicket(0, 0, this);
+
+            try {
+                // 1. Iniciar batalla y verificar estado ACTIVE
+                BattleSession session = battleManager.startBattle(endWorld);
+                if (session.getState() != BattleState.ACTIVE) {
+                    getLogger().severe("[PHASES-TEST-FAIL] La sesión no pasó al estado ACTIVE tras el spawn.");
+                    return;
+                }
+                Optional<DragonIdentity> identityOpt = session.getDragonIdentity();
+                if (identityOpt.isEmpty()) {
+                    getLogger().severe("[PHASES-TEST-FAIL] DragonIdentity ausente en la sesión.");
+                    return;
+                }
+                EnderDragon dragon = (EnderDragon) Bukkit.getEntity(identityOpt.get().entityUniqueId());
+                if (dragon == null || !dragon.isValid()) {
+                    getLogger().severe("[PHASES-TEST-FAIL] Entidad del dragón no válida.");
+                    return;
+                }
+
+                // 2. Comprobar Fase Inicial
+                PhaseRuntime phaseRuntime = session.getPhaseRuntime();
+                if (phaseRuntime == null) {
+                    getLogger().severe("[PHASES-TEST-FAIL] PhaseRuntime es nulo en la sesión.");
+                    return;
+                }
+                if (!phaseRuntime.isInitialized() || phaseRuntime.getCurrentPhaseIndex() != 0
+                        || !phaseRuntime.getCurrentPhase().id().equals("phase_1")) {
+                    getLogger().severe("[PHASES-TEST-FAIL] La fase inicial no es phase_1 (index=0). Actual: "
+                            + phaseRuntime.getCurrentPhase().id() + " (index=" + phaseRuntime.getCurrentPhaseIndex() + ")");
+                    return;
+                }
+                getLogger().info("[PHASES-CHECK-1] Fase inicial correctamente establecida en phase_1 (index=0, threshold=1.0).");
+
+                // 3. Comprobar catálogo de snapshot congelado
+                if (session.getConfigSnapshot().dragonDefinition().phases().size() < 4) {
+                    getLogger().severe("[PHASES-TEST-FAIL] El snapshot no contiene las 4 fases configuradas.");
+                    return;
+                }
+                AbilityEngine abilityEngine = session.getAbilityEngine();
+                if (abilityEngine == null) {
+                    getLogger().severe("[PHASES-TEST-FAIL] AbilityEngine no inicializado en la sesión.");
+                    return;
+                }
+                getLogger().info("[PHASES-CHECK-2] Snapshot congelado verificado: 4 fases configuradas e infraestructura lista.");
+
+                // 4. Daño reduce vida y cruza a Fase 2 (70% < 75%)
+                phaseRuntime.updateHealth(140.0, 200.0, 100L, dragon);
+                if (phaseRuntime.getCurrentPhaseIndex() != 1 || !phaseRuntime.getCurrentPhase().id().equals("phase_2")) {
+                    getLogger().severe("[PHASES-TEST-FAIL] Progresión a phase_2 falló. Actual: "
+                            + phaseRuntime.getCurrentPhase().id());
+                    return;
+                }
+                getLogger().info("[PHASES-CHECK-3] Progresión por threshold verificada: 140.0/200.0 (0.70) transicionó a phase_2.");
+
+                // 5. Monotonicidad: curación con cristales (190.0/200.0 = 95%) NO debe revertir a phase_1
+                phaseRuntime.updateHealth(190.0, 200.0, 110L, dragon);
+                if (phaseRuntime.getCurrentPhaseIndex() != 1 || !phaseRuntime.getCurrentPhase().id().equals("phase_2")) {
+                    getLogger().severe("[PHASES-TEST-FAIL] Violación de monotonicidad: la fase revirtió tras curación. Actual: "
+                            + phaseRuntime.getCurrentPhase().id());
+                    return;
+                }
+                getLogger().info("[PHASES-CHECK-4] Monotonicidad estricta verificada: curación a 190.0/200.0 (95%) no revierte la fase (continúa en phase_2).");
+
+                // 6. Salto masivo de fases: vida cae directamente a 40.0 (20% <= 25%) -> salta a phase_4 (index=3)
+                phaseRuntime.updateHealth(40.0, 200.0, 120L, dragon);
+                if (phaseRuntime.getCurrentPhaseIndex() != 3 || !phaseRuntime.getCurrentPhase().id().equals("phase_4")) {
+                    getLogger().severe("[PHASES-TEST-FAIL] Salto determinista de fases falló. Actual: "
+                            + phaseRuntime.getCurrentPhase().id() + " (index=" + phaseRuntime.getCurrentPhaseIndex() + ")");
+                    return;
+                }
+                getLogger().info("[PHASES-CHECK-5] Salto masivo determinista verificado: caída a 20% avanzó directamente a phase_4 (index=3).");
+
+                // 7. Ejecución de habilidad y cooldown (infraestructura de prueba sin moveset inventado)
+                maurxp.betterdragon.ability.AbilityDefinition testAbility = new maurxp.betterdragon.ability.AbilityDefinition(
+                        "probe_test_ability",
+                        maurxp.betterdragon.ability.AbilityTrigger.PERIODIC,
+                        100L,
+                        maurxp.betterdragon.ability.TargetSelectorType.ALL_IN_ARENA,
+                        maurxp.betterdragon.ability.EffectOriginType.DRAGON_BODY,
+                        maurxp.betterdragon.ability.AbilityEffectType.SOUND
+                );
+
+                boolean executed = abilityEngine.executeAbility(testAbility, phaseRuntime.getCurrentPhase(), session,
+                        dragon, maurxp.betterdragon.ability.AbilityTrigger.PERIODIC, Optional.empty(), Optional.empty(), 130L);
+                if (!executed) {
+                    getLogger().severe("[PHASES-TEST-FAIL] Falló la ejecución de la habilidad de prueba.");
+                    return;
+                }
+                getLogger().info("[PHASES-CHECK-6] Habilidad ejecutada exitosamente a través de AbilityEngine.");
+
+                // Comprobar que cooldown bloquea ejecución en el tick 131
+                boolean blocked = abilityEngine.executeAbility(testAbility, phaseRuntime.getCurrentPhase(), session,
+                        dragon, maurxp.betterdragon.ability.AbilityTrigger.PERIODIC, Optional.empty(), Optional.empty(), 131L);
+                if (blocked) {
+                    getLogger().severe("[PHASES-TEST-FAIL] La habilidad se ejecutó ignorando su cooldown.");
+                    return;
+                }
+                getLogger().info("[PHASES-CHECK-7] Cooldown en ticks lógicos verificado: segunda ejecución en tick 131 bloqueada correctamente.");
+
+                // 8. Reset de cooldowns
+                abilityEngine.resetCooldowns();
+                if (!abilityEngine.getCooldownTracker().isReady("probe_test_ability", 131L)) {
+                    getLogger().severe("[PHASES-TEST-FAIL] resetCooldowns no liberó la habilidad.");
+                    return;
+                }
+                getLogger().info("[PHASES-CHECK-8] Reset de cooldowns verificado: habilidad disponible inmediatamente tras reset.");
+
+                // 9. Aislamiento total con segunda batalla
+                BattleSession session2 = BattleSession.create(BattleId.random(), "world_the_end_2", UUID.randomUUID());
+                if (session2.getPhaseRuntime().getCurrentPhaseIndex() != 0) {
+                    getLogger().severe("[PHASES-TEST-FAIL] Aislamiento entre batallas falló: sesión 2 no inició en phase_1.");
+                    return;
+                }
+                getLogger().info("[PHASES-CHECK-9] Aislamiento de sesiones verificado: sesión 2 permanece en phase_1 independientemente de sesión 1.");
+
+                // 10. Muerte transiciona limpiamente a DYING
+                dragon.setHealth(0.0);
+                if (session.getState() != BattleState.DYING) {
+                    getLogger().severe("[PHASES-TEST-FAIL] La sesión no transicionó a DYING tras la muerte del dragón.");
+                    return;
+                }
+                getLogger().info("[PHASES-CHECK-10] Transición terminal a DYING preservada.");
+
+                getLogger().info("==================================================");
+                getLogger().info("=== ALL PHASES & ABILITIES VERIFICATION PASSED! ===");
+                getLogger().info("==================================================");
+
+                // Apagado limpio programado del servidor de pruebas
+                Bukkit.getScheduler().runTask(this, Bukkit::shutdown);
+            } finally {
+                endWorld.removePluginChunkTicket(0, 0, this);
+            }
+        } catch (Exception e) {
+            getLogger().log(Level.SEVERE,
+                    "[PHASES-TEST-ERROR] Excepción inesperada durante la verificación de fases: " + e.getMessage(), e);
         }
     }
 }

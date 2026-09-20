@@ -17,16 +17,18 @@ import java.util.Set;
  * aislado para ser inyectado en una {@code BattleSession}.</li>
  * </ul>
  *
- * @param portalEnabled si la gestión del portal central de bedrock está
- *                      habilitada tras victoria
- * @param loggingLevel  nivel de log en consola (INFO, WARNING, SEVERE, OFF)
- * @param debugLogging  si se emiten logs detallados de depuración
+ * @param portalEnabled    si la gestión del portal central de bedrock está
+ *                         habilitada tras victoria
+ * @param loggingLevel     nivel de log en consola (INFO, WARNING, SEVERE, OFF)
+ * @param debugLogging     si se emiten logs detallados de depuración
+ * @param dragonDefinition definición de fases y habilidades del dragón
  * @author maurxp
  */
 public record BetterDragonConfig(
         boolean portalEnabled,
         String loggingLevel,
-        boolean debugLogging) {
+        boolean debugLogging,
+        DragonDefinition dragonDefinition) {
 
     public static final boolean DEFAULT_PORTAL_ENABLED = false;
     public static final String DEFAULT_LOGGING_LEVEL = "INFO";
@@ -42,6 +44,14 @@ public record BetterDragonConfig(
                     "Nivel de log inválido: '" + loggingLevel + "'. Valores permitidos: " + VALID_LOG_LEVELS);
         }
         loggingLevel = upperLevel;
+        Objects.requireNonNull(dragonDefinition, "dragonDefinition no puede ser nulo");
+    }
+
+    /**
+     * Constructor retrocompatible para inicializaciones sin definición explícita de dragón.
+     */
+    public BetterDragonConfig(boolean portalEnabled, String loggingLevel, boolean debugLogging) {
+        this(portalEnabled, loggingLevel, debugLogging, DragonDefinition.defaults());
     }
 
     /**
@@ -53,7 +63,8 @@ public record BetterDragonConfig(
         return new BetterDragonConfig(
                 DEFAULT_PORTAL_ENABLED,
                 DEFAULT_LOGGING_LEVEL,
-                DEFAULT_DEBUG_LOGGING);
+                DEFAULT_DEBUG_LOGGING,
+                DragonDefinition.defaults());
     }
 
     /**
@@ -65,6 +76,7 @@ public record BetterDragonConfig(
     public BattleConfigurationSnapshot toBattleSnapshot() {
         return new BattleConfigurationSnapshot(
                 this.portalEnabled,
-                this.debugLogging);
+                this.debugLogging,
+                this.dragonDefinition);
     }
 }

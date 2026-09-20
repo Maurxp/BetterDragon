@@ -13,9 +13,13 @@
 ---
 
 ## Estado Actual del Proyecto
-- **Fase 3.0-R1:** Bootstrap y Estructura Productiva `[DONE]`
-- **Fase 3.1:** Modelos de Dominio y Ciclo de Vida Base `[DONE]`
-- **Próxima Subfase:** Fase 3.2 — Sistema de Configuración y Snapshots `[TODO]`
+- **Fase 3.0–3.0-R1:** Bootstrap y Estructura Productiva `[DONE]`
+- **Fase 3.1:** Modelos de Dominio e Invariantes de Estado `[DONE]`
+- **Fase 3.2:** Sistema de Configuración y Snapshots Inmutables `[DONE]`
+- **Fase 3.3–3.3-R1:** Dragon Lifecycle, Firma PDC y Recuperación de Chunks `[DONE]`
+- **Fase 3.4:** Combat Runtime, Damage Tracking y Atribución `[DONE]`
+- **Fase 3.5:** Combat Phases & Abilities (Fases Ordenadas, Monotonicidad, AbilityEngine, R1) `[COMPLETE]`
+- **Próxima Subfase:** Fase 3.6 — Arena, Reglas y Límites `[TODO]`
 
 ---
 

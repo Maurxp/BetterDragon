@@ -6,6 +6,7 @@ import maurxp.betterdragon.battle.DragonPdcHandler;
 import maurxp.betterdragon.battle.model.BattleState;
 import maurxp.betterdragon.battle.model.DragonIdentity;
 import org.bukkit.Bukkit;
+import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.ComplexEntityPart;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.EnderDragonPart;
@@ -106,6 +107,14 @@ public class DragonCombatListener implements Listener {
         if (snapshotOpt.isEmpty()) {
             // El evento BetterDragonDamageEvent fue cancelado por un consumidor
             event.setCancelled(true);
+        } else {
+            // Notificar al PhaseRuntime para actualización inmediata de fases ante daño confirmado
+            double maxHealth = 200.0;
+            if (dragon.getAttribute(Attribute.MAX_HEALTH) != null) {
+                maxHealth = dragon.getAttribute(Attribute.MAX_HEALTH).getValue();
+            }
+            double prospectiveHealth = Math.max(0.0, dragon.getHealth() - damage);
+            session.getPhaseRuntime().updateHealth(prospectiveHealth, maxHealth, currentTick, dragon);
         }
     }
 

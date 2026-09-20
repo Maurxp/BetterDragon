@@ -6,8 +6,10 @@ import maurxp.betterdragon.battle.model.BattleState;
 import maurxp.betterdragon.battle.model.DragonIdentity;
 import maurxp.betterdragon.config.BattleConfigurationSnapshot;
 import maurxp.betterdragon.config.ConfigurationService;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Entity;
 
@@ -118,6 +120,26 @@ public class BattleManager {
         DragonIdentity identity = identityOpt.get();
         session.activate(identity);
         logger.info("[BetterDragon] Batalla " + battleId + " activada exitosamente con dragón UUID: " + dragon.getUniqueId());
+
+        // 8. Inicializar runtime de fases con la entidad
+        double maxHealth = 200.0;
+        try {
+            if (dragon.getAttribute(Attribute.MAX_HEALTH) != null) {
+                maxHealth = dragon.getAttribute(Attribute.MAX_HEALTH).getValue();
+            }
+        } catch (Throwable ignored) {
+        }
+        double currentHealth = maxHealth;
+        try {
+            currentHealth = dragon.getHealth();
+        } catch (Throwable ignored) {
+        }
+        long tick = 0L;
+        try {
+            tick = Bukkit.getCurrentTick();
+        } catch (Throwable ignored) {
+        }
+        session.getPhaseRuntime().initialize(currentHealth, maxHealth, tick, dragon);
 
         return session;
     }

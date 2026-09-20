@@ -123,4 +123,50 @@ class ConfigurationServiceTest {
         // Configuración activa intacta
         assertFalse(service.getActiveConfig().portalEnabled());
     }
+
+    @Test
+    @DisplayName("Fail-Safe: Recarga con fases de dragón inválidas rechaza el cambio y conserva las fases anteriores")
+    void testReloadFailSafeWithInvalidPhasesPreservesPreviousPhases(@TempDir Path tempDir) throws Exception {
+        Path configPath = tempDir.resolve("config.yml");
+        Files.writeString(configPath, """
+                portal:
+                  enabled: true
+                dragons:
+                  default:
+                    phases:
+                      - id: "p1"
+                        threshold: 1.00
+                        abilities: []
+                      - id: "p2"
+                        threshold: 0.50
+                        abilities: []
+                """);
+
+        ConfigurationService service = new ConfigurationService(logger);
+        service.loadInitial(configPath.toFile());
+        assertEquals(2, service.getActiveConfig().dragonDefinition().phases().size());
+        assertEquals("p2", service.getActiveConfig().dragonDefinition().phases().get(1).id());
+
+        // Modificar a YAML con thresholds no decrecientes (0.50 <= 0.80)
+        Files.writeString(configPath, """
+                portal:
+                  enabled: true
+                dragons:
+                  default:
+                    phases:
+                      - id: "p1"
+                        threshold: 0.50
+                        abilities: []
+                      - id: "p2"
+                        threshold: 0.80
+                        abilities: []
+                """);
+
+        boolean ok = service.reload(configPath.toFile());
+        assertFalse(ok, "La recarga debió ser rechazada por thresholds inválidos");
+
+        // Fases anteriores intactas (p1=1.0, p2=0.5)
+        assertEquals(2, service.getActiveConfig().dragonDefinition().phases().size());
+        assertEquals(0.50, service.getActiveConfig().dragonDefinition().phases().get(1).healthRatioThreshold(), 0.001);
+    }
 }

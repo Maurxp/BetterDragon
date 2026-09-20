@@ -23,7 +23,7 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 | **3.3** | **Dragon Lifecycle e Identidad** | Paper API spawning, firma PDC (`managed`, `battle_id`), DragonIdentity, BattleManager, EntityDeathEvent (0 XP vanilla), semántica de chunks y separación de DragonBattle. | `DONE` |
 | **3.3-R1** | **Corrección Quirúrgica Lifecycle** | Eliminación de claves PDC innecesarias (`definition_id`, `schema_version`), resolución estricta de entidad en `DEFERRED_PENDING_CHUNK_LOAD` y restauración de estado lógico previo. | `DONE` |
 | **3.4** | **Combat Runtime** | Registro de participantes, tracking de daño en hilo principal, hitSequence monotónico, historicalName vs lastKnownName, TOP_DAMAGE con desempate determinista, evento BetterDragonDamageEvent, snapshots inmutables. | `DONE` |
-| **3.5** | **Motor de Habilidades y Fases** | Fases por vida/tiempo, telégrafos visuales/sonoros con partículas/Adventure, precondiciones de ataque. | `TODO` |
+| **3.5** | **Motor de Habilidades y Fases** | Fases ordenadas, progresión monotónica por ratio de salud, AbilityEngine, TargetSelector, LocationResolver, efectos de combate (0% NMS), snapshots tipados, correcciones R1. | `COMPLETE` |
 | **3.6** | **Arena, Reglas y Límites** | Límites geométricos de arena, reglas anti-cheese y confinamiento espacial. | `TODO` |
 | **3.7** | **Muerte, Victoria y BattleResult** | Transición terminal a COMPLETED, consolidación de BattleResult con CombatSnapshot final. | `TODO` |
 | **3.8** | **Recompensas y Claims** | Cálculo de botín, redistribución proporcional de no elegibles y buzón de claims en SQLite. | `TODO` |
@@ -54,3 +54,32 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 - **Validación Runtime (Paper 26.1.2-74):**
   - Suite de integración automatizada ejecutada con comando `bd-test-combat`.
   - 13/13 checks físicos verificados en el servidor headless, concluyendo con apagado limpio exitoso (`exit code 0`).
+
+---
+
+## 4. Estado de la Fase 3.5 (Combat Phases & Abilities) — `COMPLETE` (Auditoría R1 Aplicada)
+
+- **Modelos y Runtime de Fases (`maurxp.betterdragon.phase`):**
+  - `PhaseDefinition`: Record inmutable con orden, umbral de salud relativo `healthRatioThreshold` y catálogo de identificadores de habilidades.
+  - `PhaseRuntime`: Gestor encapsulado en `BattleSession` que mantiene la progresión monotónica unidireccional y el salto determinista de umbrales.
+  - `BetterDragonPhaseChangeEvent`: Evento Bukkit informativo y no cancelable.
+  - `PhaseChangeEventDispatcher`: Interfaz funcional para despacho desacoplado testeable.
+- **Motor de Habilidades (`maurxp.betterdragon.ability`):**
+  - `AbilityDefinition`: Definición declarativa tipada inmutable con trigger, cooldown en ticks lógicos, selector, origen y tipo de efecto.
+  - `AbilityTrigger`: `ON_PHASE_ENTER`, `PERIODIC`.
+  - `TargetSelectorType` y `TargetSelector`: Selección determinista de jugadores válidos en arena (`ALL_IN_ARENA`, `RANDOM_PLAYER`, `RANDOM_SUBSET`, `NEAREST_PLAYER`, `DAMAGER`, `TRIGGERING_PLAYER`).
+  - `EffectOriginType`, `BattleSpatialContext` y `LocationResolver`: Resolución 0% NMS de orígenes espaciales con fallbacks seguros (`DRAGON_HEAD`, `DRAGON_BODY`, `TARGET_FEET`, `PODIUM_CENTER`, `ARENA_CENTER`, `TRIGGER_LOCATION`), separando formalmente el podium de la arena de combate.
+  - `AbilityEffect` y Efectos Canónicos: `DamageEffect` (aislado de CombatRuntime), `KnockbackEffect`, `ParticleEffect`, `SoundEffect`.
+  - `AbilityCooldownTracker`: Seguimiento estricto en ticks de servidor, con reset al cambiar de fase.
+  - `AbilityExecutionContext`: Contexto inmutable y efímero suministrado a los efectos.
+  - `AbilityEngine`: Coordinador resiliente con resolución espacial `Origin -> Target`, validación estricta de triggers de habilidad y captura segura de `Exception` (sin silenciar errores críticos de la JVM).
+- **Configuración y Snapshots (`maurxp.betterdragon.config`):**
+  - `DragonDefinition`: Modelo inmutable con validación de monotonicidad de thresholds e integridad referencial de habilidades.
+  - `BattleConfigurationSnapshot`: Congela `DragonDefinition` aislando la batalla de recargas YAML.
+  - `ConfigurationLoader`: Deserialización tipada estricta y fail-safe de secciones `dragons` y `abilities`, admitiendo catálogos vacíos sin imponer moveset inventado.
+  - `config.yml`: Configuración base limpia sin ataques inventados (`abilities: {}`, fases con `abilities: []`).
+- **Pruebas Unitarias:**
+  - 52 pruebas unitarias de Fases y Habilidades (142 pruebas unitarias en total en el proyecto, 0 fallos, 0 errores).
+- **Validación Runtime (Paper 26.1.2-74):**
+  - Suite de integración automatizada ejecutada con comando `bd-test-phases`.
+  - 10/10 checks de runtime verificados en el servidor headless, concluyendo con apagado limpio exitoso (`exit code 0`).
