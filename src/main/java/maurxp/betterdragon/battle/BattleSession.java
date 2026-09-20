@@ -13,6 +13,7 @@ import maurxp.betterdragon.battle.model.BattleResult;
 import maurxp.betterdragon.battle.model.BattleState;
 import maurxp.betterdragon.battle.model.DragonIdentity;
 import maurxp.betterdragon.combat.CombatRuntime;
+import maurxp.betterdragon.combat.CombatSnapshot;
 import maurxp.betterdragon.config.BattleConfigurationSnapshot;
 import maurxp.betterdragon.phase.PhaseRuntime;
 import org.bukkit.entity.EnderDragon;
@@ -69,6 +70,7 @@ public class BattleSession {
     private Instant activatedAt;
     private Instant completedAt;
     private BattleState stateBeforeChunkDeferral;
+    private BattleResult result;
 
     public BattleSession(BattleId battleId, String worldName, UUID worldUniqueId,
             BattleConfigurationSnapshot configSnapshot) {
@@ -164,6 +166,32 @@ public class BattleSession {
     }
 
     /**
+     * Concluye la batalla con victoria y genera el resultado inmutable final con instantánea de combate.
+     * Transición: DYING -> COMPLETED.
+     *
+     * @param slayerUniqueId      UUID del Slayer (TOP_DAMAGE)
+     * @param slayerLastKnownName snapshot del nombre del Slayer
+     * @param combatSnapshot      instantánea inmutable del estado de combate con participantes
+     * @return resultado inmutable de la batalla
+     */
+    public BattleResult complete(UUID slayerUniqueId, String slayerLastKnownName, CombatSnapshot combatSnapshot) {
+        if (this.state == BattleState.COMPLETED && this.result != null) {
+            return this.result;
+        }
+        transitionTo(BattleState.COMPLETED);
+        this.completedAt = Instant.now();
+
+        this.result = BattleResult.completed(
+                this.battleId,
+                this.activatedAt != null ? this.activatedAt : this.createdAt,
+                this.completedAt,
+                slayerUniqueId,
+                slayerLastKnownName,
+                combatSnapshot);
+        return this.result;
+    }
+
+    /**
      * Concluye la batalla con victoria y genera el resultado inmutable final.
      * Transición: DYING -> COMPLETED.
      *
@@ -172,15 +200,7 @@ public class BattleSession {
      * @return resultado inmutable de la batalla
      */
     public BattleResult complete(UUID slayerUniqueId, String slayerLastKnownName) {
-        transitionTo(BattleState.COMPLETED);
-        this.completedAt = Instant.now();
-
-        return BattleResult.completed(
-                this.battleId,
-                this.activatedAt != null ? this.activatedAt : this.createdAt,
-                this.completedAt,
-                slayerUniqueId,
-                slayerLastKnownName);
+        return complete(slayerUniqueId, slayerLastKnownName, this.combatRuntime != null ? this.combatRuntime.createSnapshot() : null);
     }
 
     /**
@@ -204,14 +224,18 @@ public class BattleSession {
      * @return resultado inmutable de la batalla abortada
      */
     public BattleResult abort(String reason) {
+        if (this.state == BattleState.ABORTED && this.result != null) {
+            return this.result;
+        }
         transitionTo(BattleState.ABORTED);
         this.completedAt = Instant.now();
 
-        return BattleResult.aborted(
+        this.result = BattleResult.aborted(
                 this.battleId,
                 this.activatedAt != null ? this.activatedAt : this.createdAt,
                 this.completedAt,
                 reason);
+        return this.result;
     }
 
     /**
@@ -279,6 +303,15 @@ public class BattleSession {
 
     public Optional<Instant> getCompletedAt() {
         return Optional.ofNullable(completedAt);
+    }
+
+    /**
+     * Retorna el resultado final inmutable de la batalla si ha concluido.
+     *
+     * @return Optional con el BattleResult si la sesión es terminal, o empty si continúa en curso
+     */
+    public Optional<BattleResult> getResult() {
+        return Optional.ofNullable(result);
     }
 
     public boolean isActive() {

@@ -43,12 +43,10 @@ public class CombatRuntime {
      * Comparador determinista para determinar TOP_DAMAGE:
      * 1. Mayor totalDamage.
      * 2. Menor firstHitSequence (quien golpeó primero / aportó antes).
-     * 3. Orden lexicográfico del UUID como desempate matemático definitivo.
      */
     private static final Comparator<ParticipantSnapshot> TOP_DAMAGE_COMPARATOR = Comparator
             .comparingDouble(ParticipantSnapshot::totalDamage)
-            .thenComparing(Comparator.comparingLong(ParticipantSnapshot::firstHitSequence).reversed())
-            .thenComparing(p -> p.playerId().toString());
+            .thenComparing(Comparator.comparingLong(ParticipantSnapshot::firstHitSequence).reversed());
 
     public CombatRuntime(BattleSession session, DamageEventDispatcher eventDispatcher) {
         this.session = Objects.requireNonNull(session, "session no puede ser nula");
@@ -223,7 +221,6 @@ public class CombatRuntime {
      * Criterio de Desempate Determinista:
      * Si dos o más jugadores tienen exactamente el mismo daño acumulado, el desempate
      * se resuelve a favor del jugador con menor {@code firstHitSequence} (quien aportó primero).
-     * Si aún existiera igualdad, se aplica orden lexicográfico sobre sus UUID.
      *
      * @return instantánea del Slayer (TOP_DAMAGE), o empty si no hay participantes
      */

@@ -230,10 +230,9 @@ ParticipantSnapshot (Inmutable) / Futuras Fases
 
 ### 6.4 Determinación de TOP_DAMAGE y Desempate
 El participante con mayor daño acumulado se determina mediante:
-1. Mayor `totalDamage` acumulado.
-2. Desempate primario determinista: menor `firstHitSequence` (quien aportó primero al combate).
-3. Desempate secundario definitivo: orden lexicográfico del `UUID.toString()`.
-Garantiza un resultado determinista idéntico e independiente del orden de iteración de `HashMap`.
+1. Mayor `totalDamage` acumulado (`totalDamage DESC`).
+2. Desempate determinista: menor `firstHitSequence` (`firstHitSequence ASC`, quien aportó primero al combate).
+Sin tercer criterio lexicográfico por UUID. Garantiza un resultado determinista idéntico e independiente del orden de iteración de `HashMap`.
 
 ### 6.5 Deuda Técnica de Identidad (Registrada de 3.3-R1)
 > 3.3-R1 mantiene `definitionId` y `schemaVersion` fuera del PDC efectivo. `DragonIdentity` todavía contiene defaults heredados de la arquitectura inicial (`"default"`, `1`). En Fase 3.5, `DragonDefinition` se introduce formalmente en la capa de configuración tipada y snapshot inmutable (`BattleConfigurationSnapshot`), asociando fases y habilidades sin escribir aún en el PDC físico.
@@ -346,3 +345,63 @@ arenas.yml ──► [ArenaConfigurationLoader] ──► [ArenaConfigurationSna
 ### 8.5 Confinamiento de Responsabilidades y Cero NMS
 - La capa de Arena no implementa recompensas, claims, portales, inventarios, destrucción global de bloques ni trampas de teletransporte.
 - 0% NMS: Todas las consultas espaciales operan sobre primitivos matemáticos puros y la API pública de Bukkit/Paper.
+
+---
+
+## 9. Muerte, Victoria y BattleResult (Fase 3.7 & 3.7-R1)
+
+### 9.1 Fuente Exclusiva de Verdad de la Victoria
+- La **única fuente válida** para decretar la victoria de una batalla BetterDragon es el evento de Bukkit `EntityDeathEvent` sobre el `EnderDragon` físico administrado (`betterdragon:managed=true`, `betterdragon:battle_id`).
+- **Independencia Total de DragonBattle:** BetterDragon ignora por completo el ciclo de vida, métodos o estados internos de `DragonBattle` / `EnderDragonFight` (`dragonKilled`, `getEnderDragon()`, `hasBeenPreviouslyKilled()`). La fuente de verdad reside en la `BattleSession` y en la identidad PDC persistente.
+- **Control Soberano sobre Recompensas Vanilla:**
+  - Al confirmarse la defunción legítima de un dragón administrado, BetterDragon suprime los drops vanilla (`deathEvent.getDrops().clear()`) y la experiencia (`deathEvent.setDroppedExp(0)`), evitando que las recompensas vanilla interfieran con el futuro sistema de Rewards de BetterDragon.
+  - **Dragones Vanilla Intactos:** Dragones no administrados (sin PDC) no sufren alteración alguna; conservan intactos sus drops y experiencia vanilla, y no disparan eventos ni transiciones de BetterDragon.
+- **Dragon Egg y Primera Victoria Independientes:**
+  - El Dragon Egg y la determinación de "primera victoria" no dependen de `DragonBattle` ni de su estado vanilla (`hasBeenPreviouslyKilled()`).
+  - En esta fase NO se genera ni manipula ningún bloque ni ítem de Dragon Egg. El ciclo de vida completo del Egg queda explícitamente reservado al sistema propio de BetterDragon en fases posteriores.
+
+### 9.2 Distinción Crítica: Muerte Real vs Entidad Desaparecida
+- **Muerte Real (`EntityDeathEvent`):** Representa la muerte natural del dragón por combate legítimo. Dispara la secuencia de victoria `ACTIVE -> DYING -> COMPLETED` y emite `BetterDragonVictoryEvent`.
+- **Entidad Desaparecida (`EntityRemoveEvent` / Fallo de Recuperación):** Si durante un reinicio o recarga de chunks la entidad no se encuentra o su identidad PDC no coincide, la sesión transiciona a `ABORTED` (`BattleAbortReason.ENTITY_MISSING`). **Bajo ninguna circunstancia la ausencia de una entidad se interpreta como victoria.**
+- Si el chunk está descargado temporalmente, la batalla se mantiene en `DEFERRED_PENDING_CHUNK_LOAD` y no finaliza prematuramente.
+
+### 9.3 Idempotencia y Compuertas de Estado
+- `BattleManager.handleDragonDeath` implementa compuertas estrictas:
+  - Si la sesión ya se encuentra en `COMPLETED`, devuelve el `BattleResult` inmutable previamente cacheado sin redisparar eventos ni mutar contadores.
+  - Si la sesión está en `ABORTED`, `IDLE` o `PREPARING`, se descarta de forma segura como no-op.
+  - Si la sesión está en `DEFERRED_PENDING_CHUNK_LOAD`, valida el dragón y reanuda la sesión antes de procesar la defunción.
+- La transición transcurre por los estados formales:
+  ```text
+  ACTIVE
+    ↓
+  EntityDeathEvent (Cancela 12,000 XP vanilla y drops)
+    ↓
+  DYING (Cierre definitivo de registro de daño en CombatRuntime)
+    ↓
+  Captura de CombatSnapshot inmutable + Determinación de Slayer (TOP_DAMAGE)
+    ↓
+  COMPLETED (Construcción de BattleResult + Despacho de BetterDragonVictoryEvent)
+  ```
+
+### 9.4 Determinación de Slayer (`TOP_DAMAGE`) y Desempate
+- La política de diseño inmutable del proyecto es `Slayer = TOP_DAMAGE`.
+- El Slayer se extrae del snapshot inmutable de `CombatRuntime` mediante dos únicos criterios deterministas:
+  1. Participante con mayor daño total acumulado (`totalDamage DESC`).
+  2. Si existe empate en daño, desempata exclusivamente el menor `firstHitSequence` (`firstHitSequence ASC`, quien asestó el primer golpe registrado).
+  3. No se utiliza ningún tercer criterio (se eliminó definitivamente el desempate por UUID lexicográfico).
+- Los participantes desconectados u offline conservan intacta su candidatura como Slayer con sus nombres históricos (`historicalName` y `lastKnownName`).
+
+### 9.5 Inmutabilidad de `BattleResult` y Frontera de Dominio
+- `BattleResult` es un `record` inmutable y serializable:
+  - Almacena `CombatSnapshot` (lista inmutable de `ParticipantSnapshot`, secuencias, daño total acumulado).
+  - **Cero referencias vivas:** No almacena instancias de `Player`, `Entity`, `World` ni colecciones mutables de Bukkit.
+  - Diseñado para ser consumido de forma thread-safe en fases posteriores por Recompensas (3.8), Persistencia SQLite (3.9) y Leaderboard (3.10).
+
+### 9.6 Evento Público de Dominio: `BetterDragonVictoryEvent`
+- Evento Bukkit público en `maurxp.betterdragon.battle.event`, no cancelable e informativo.
+- Publicado tras alcanzar el estado final `COMPLETED`, exponiendo únicamente tipos de dominio seguros e inmutables (`BattleId`, `BattleResult`, `worldName`).
+- **Encapsulación Estricta de Runtime:** `BetterDragonVictoryEvent` NO expone `BattleSession` ni ningún runtime mutable interno (`CombatRuntime`, `PhaseRuntime`, `AbilityEngine`). Los consumidores externos acceden a los datos de la batalla exclusivamente a través de `BattleResult`.
+- Desacoplado mediante la interfaz funcional `VictoryEventDispatcher` para habilitar pruebas unitarias puras sin necesidad de un servidor Bukkit mockeado.
+
+### 9.7 Límites Estrictos y Futuras Fases
+- En esta fase **NO** se implementan recompensas, entrega de ítems, claims, base de datos SQLite, leaderboard, portal central, generación de Dragon Egg ni comandos de administración.

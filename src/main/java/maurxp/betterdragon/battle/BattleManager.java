@@ -1,10 +1,15 @@
 package maurxp.betterdragon.battle;
 
 import maurxp.betterdragon.arena.ArenaDefinition;
+import maurxp.betterdragon.battle.event.BetterDragonVictoryEvent;
+import maurxp.betterdragon.battle.event.VictoryEventDispatcher;
 import maurxp.betterdragon.battle.model.BattleAbortReason;
 import maurxp.betterdragon.battle.model.BattleId;
+import maurxp.betterdragon.battle.model.BattleResult;
 import maurxp.betterdragon.battle.model.BattleState;
 import maurxp.betterdragon.battle.model.DragonIdentity;
+import maurxp.betterdragon.combat.CombatSnapshot;
+import maurxp.betterdragon.combat.ParticipantSnapshot;
 import maurxp.betterdragon.config.BattleConfigurationSnapshot;
 import maurxp.betterdragon.config.ConfigurationService;
 import org.bukkit.Bukkit;
@@ -13,9 +18,11 @@ import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Entity;
+import org.bukkit.event.entity.EntityDeathEvent;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -31,6 +38,8 @@ import java.util.logging.Logger;
  *       rastro, remueve la sesión de memoria y marca la sesión como abortada.</li>
  *   <li><b>Disponibilidad Determinista de Arena (Fase 3.6):</b> Valida que la arena exista, sus límites
  *       sean coherentes y el mundo esté disponible antes de iniciar la batalla. Cero fallbacks hardcodeados.</li>
+ *   <li><b>Finalización Idempotente de Victoria (Fase 3.7):</b> Procesa {@code EntityDeathEvent}, transiciona
+ *       {@code ACTIVE -> DYING -> COMPLETED}, resuelve el Slayer (TOP_DAMAGE) y emite {@link BetterDragonVictoryEvent}.</li>
  * </ul>
  *
  * @author maurxp
@@ -40,7 +49,22 @@ public class BattleManager {
     private final BattleSessionManager sessionManager;
     private final ConfigurationService configService;
     private final DragonSpawner spawner;
+    private final VictoryEventDispatcher victoryEventDispatcher;
     private final Logger logger;
+
+    public BattleManager(
+            BattleSessionManager sessionManager,
+            ConfigurationService configService,
+            DragonSpawner spawner,
+            VictoryEventDispatcher victoryEventDispatcher,
+            Logger logger
+    ) {
+        this.sessionManager = Objects.requireNonNull(sessionManager, "sessionManager no puede ser nulo");
+        this.configService = Objects.requireNonNull(configService, "configService no puede ser nulo");
+        this.spawner = Objects.requireNonNull(spawner, "spawner no puede ser nulo");
+        this.victoryEventDispatcher = Objects.requireNonNull(victoryEventDispatcher, "victoryEventDispatcher no puede ser nulo");
+        this.logger = Objects.requireNonNull(logger, "logger no puede ser nulo");
+    }
 
     public BattleManager(
             BattleSessionManager sessionManager,
@@ -48,10 +72,18 @@ public class BattleManager {
             DragonSpawner spawner,
             Logger logger
     ) {
-        this.sessionManager = Objects.requireNonNull(sessionManager, "sessionManager no puede ser nulo");
-        this.configService = Objects.requireNonNull(configService, "configService no puede ser nulo");
-        this.spawner = Objects.requireNonNull(spawner, "spawner no puede ser nulo");
-        this.logger = Objects.requireNonNull(logger, "logger no puede ser nulo");
+        this(sessionManager, configService, spawner, createDefaultVictoryDispatcher(), logger);
+    }
+
+    private static VictoryEventDispatcher createDefaultVictoryDispatcher() {
+        return event -> {
+            try {
+                if (Bukkit.getServer() != null && Bukkit.getPluginManager() != null) {
+                    Bukkit.getPluginManager().callEvent(event);
+                }
+            } catch (Throwable ignored) {
+            }
+        };
     }
 
     /**
@@ -216,6 +248,139 @@ public class BattleManager {
             return Optional.of(session);
         }
         return Optional.empty();
+    }
+
+    /**
+     * Procesa la muerte natural del EnderDragon administrado y finaliza la batalla con victoria.
+     * <p>
+     * Garantías de idempotencia y coherencia:
+     * <ul>
+     *   <li>Verifica que la entidad sea un dragón con PDC válido perteneciente a una sesión conocida.</li>
+     *   <li>Si la sesión ya fue completada ({@code COMPLETED}), es un no-op seguro que no emite eventos duplicados.</li>
+     *   <li>Si la sesión fue abortada, no genera victoria ni emite eventos.</li>
+     *   <li>Transiciona formalmente {@code ACTIVE -> DYING -> COMPLETED}.</li>
+     *   <li>Captura un snapshot inmutable del combate ({@link CombatSnapshot}) en el hilo principal.</li>
+     *   <li>Determina el Slayer con criterio determinista {@code TOP_DAMAGE} (mayor daño acumulado, menor firstHitSequence).</li>
+     *   <li>Construye el {@link BattleResult} inmutable y emite {@link BetterDragonVictoryEvent}.</li>
+     * </ul>
+     *
+     * @param dragon     entidad física del dragón que murió
+     * @param deathEvent evento de muerte de Bukkit (opcional, para suprimir XP y drops)
+     * @return resultado inmutable de la victoria, o empty si la entidad o sesión no eran válidas
+     */
+    public Optional<BattleResult> handleDragonDeath(EnderDragon dragon, EntityDeathEvent deathEvent) {
+        if (dragon == null) {
+            return Optional.empty();
+        }
+
+        // 1. Validar identidad PDC del dragón
+        Optional<DragonIdentity> identityOpt = DragonPdcHandler.extractIdentity(dragon);
+        if (identityOpt.isEmpty()) {
+            return Optional.empty(); // Dragón vanilla u otra entidad; retorno silencioso sin spam
+        }
+
+        DragonIdentity identity = identityOpt.get();
+        Optional<BattleSession> sessionOpt = sessionManager.getSession(identity.battleId());
+        if (sessionOpt.isEmpty()) {
+            logger.warning("[BetterDragon] Detectada muerte de dragón con BattleId " + identity.battleId()
+                    + " pero no existe una sesión registrada en memoria.");
+            return Optional.empty();
+        }
+
+        BattleSession session = sessionOpt.get();
+
+        // 2. Validar que la entidad física coincida con la registrada en la sesión
+        if (session.getDragonIdentity().isPresent()) {
+            UUID registeredUuid = session.getDragonIdentity().get().entityUniqueId();
+            if (!registeredUuid.equals(dragon.getUniqueId())) {
+                logger.warning("[BetterDragon] La entidad dragón (" + dragon.getUniqueId()
+                        + ") no coincide con el dragón asignado a la sesión " + session.getBattleId()
+                        + " (" + registeredUuid + ").");
+                return Optional.empty();
+            }
+        }
+
+        // 3. Comprobar compuerta de estado e idempotencia
+        BattleState currentState = session.getState();
+        if (currentState == BattleState.COMPLETED) {
+            logger.fine("[BetterDragon] Muerte ignorada: la batalla " + session.getBattleId() + " ya está COMPLETED.");
+            return session.getResult();
+        }
+
+        if (currentState == BattleState.ABORTED) {
+            logger.fine("[BetterDragon] Muerte ignorada: la batalla " + session.getBattleId() + " ya está ABORTED.");
+            return Optional.empty();
+        }
+
+        if (currentState == BattleState.IDLE || currentState == BattleState.PREPARING) {
+            logger.warning("[BetterDragon] Muerte recibida para batalla en estado no activo: " + currentState);
+            return Optional.empty();
+        }
+
+        if (currentState == BattleState.DEFERRED_PENDING_CHUNK_LOAD) {
+            if (!DragonPdcHandler.validateDragonForSession(dragon, session)) {
+                logger.warning("[BetterDragon] Dragón en DEFERRED_PENDING_CHUNK_LOAD no superó validación de identidad al morir. Abortando por ENTITY_MISSING.");
+                session.abort(BattleAbortReason.ENTITY_MISSING);
+                return Optional.empty();
+            }
+            session.resumeFromChunkLoad();
+        }
+
+        // 4. Transicionar formalmente a DYING si aún estaba en ACTIVE
+        if (session.getState() == BattleState.ACTIVE) {
+            logger.info("[BetterDragon] EnderDragon de la batalla " + identity.battleId()
+                    + " ha muerto naturalmente. Transicionando ACTIVE -> DYING...");
+            session.beginDying();
+        }
+
+        // 5. Suprimir XP masiva y drops vanilla
+        if (deathEvent != null) {
+            deathEvent.setDroppedExp(0);
+            deathEvent.getDrops().clear();
+            logger.info("[BetterDragon] Cancelando 12000 XP vanilla y drops para el dragón de la batalla " + identity.battleId());
+        }
+
+        // 6. Capturar snapshot inmutable de combate en el hilo principal
+        CombatSnapshot combatSnapshot = session.getCombatRuntime().createSnapshot();
+
+        // 7. Determinar Slayer (TOP_DAMAGE) con desempate determinista
+        Optional<ParticipantSnapshot> topDamageOpt = session.getCombatRuntime().getTopDamageParticipant();
+        UUID slayerId = topDamageOpt.map(ParticipantSnapshot::playerId).orElse(null);
+        String slayerName = topDamageOpt.map(ParticipantSnapshot::lastKnownName).orElse(null);
+
+        if (topDamageOpt.isPresent()) {
+            logger.info("[BetterDragon] Slayer (TOP_DAMAGE) de la batalla " + session.getBattleId()
+                    + ": " + slayerName + " (" + slayerId + ") con " + topDamageOpt.get().totalDamage() + " de daño.");
+        } else {
+            logger.info("[BetterDragon] Batalla " + session.getBattleId()
+                    + " completada sin participantes registrados con daño.");
+        }
+
+        // 8. Transicionar formalmente DYING -> COMPLETED y generar BattleResult
+        BattleResult result = session.complete(slayerId, slayerName, combatSnapshot);
+        logger.info("[BetterDragon] Batalla " + session.getBattleId()
+                + " finalizada con victoria (COMPLETED). Duración: " + result.getDuration().getSeconds() + "s");
+
+        // 9. Despachar BetterDragonVictoryEvent público
+        String worldName = session.getWorldName();
+        BetterDragonVictoryEvent victoryEvent = new BetterDragonVictoryEvent(session.getBattleId(), result, worldName);
+        this.victoryEventDispatcher.dispatch(victoryEvent);
+
+        return Optional.of(result);
+    }
+
+    /**
+     * Procesa la muerte natural del EnderDragon administrado y finaliza la batalla con victoria.
+     *
+     * @param dragon entidad física del dragón que murió
+     * @return resultado inmutable de la victoria, o empty si no era válido
+     */
+    public Optional<BattleResult> handleDragonDeath(EnderDragon dragon) {
+        return handleDragonDeath(dragon, null);
+    }
+
+    public VictoryEventDispatcher getVictoryEventDispatcher() {
+        return victoryEventDispatcher;
     }
 
     public Optional<BattleSession> getActiveSession(World world) {

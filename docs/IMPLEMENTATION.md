@@ -25,7 +25,7 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 | **3.4** | **Combat Runtime** | Registro de participantes, tracking de daño en hilo principal, hitSequence monotónico, historicalName vs lastKnownName, TOP_DAMAGE con desempate determinista, evento BetterDragonDamageEvent, snapshots inmutables. | `DONE` |
 | **3.5** | **Motor de Habilidades y Fases** | Fases ordenadas, progresión monotónica por ratio de salud, AbilityEngine, TargetSelector, LocationResolver, efectos de combate (0% NMS), snapshots tipados, correcciones R1. | `COMPLETE` |
 | **3.6** | **Arena, Reglas y Límites** | Límites geométricos de arena, reglas anti-cheese, separación podium/centro, snapshot inmutable y correcciones R1. | `COMPLETE` |
-| **3.7** | **Muerte, Victoria y BattleResult** | Transición terminal a COMPLETED, consolidación de BattleResult con CombatSnapshot final. | `TODO` |
+| **3.7** | **Muerte, Victoria y BattleResult** | Transición terminal a COMPLETED, consolidación de BattleResult con CombatSnapshot final, Slayer TOP_DAMAGE, evento de victoria. | `COMPLETE` |
 | **3.8** | **Recompensas y Claims** | Cálculo de botín, redistribución proporcional de no elegibles y buzón de claims en SQLite. | `TODO` |
 | **3.9** | **Persistencia SQLite** | Single-Writer Async Worker, migración de esquema y almacenamiento no bloqueante. | `TODO` |
 | **3.10**| **Sistema de Leaderboard** | Agregación de estadísticas históricas (Top Slayers, Mayor Daño, Total Batallas) con caché en memoria. | `TODO` |
@@ -117,3 +117,41 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 - **Validación Runtime (Paper 26.1.2-74):**
   - Suite de integración de arenas ejecutada con comando `bd-test-arena`: 8/8 checks verificados con apagado limpio exitoso (`exit code 0`).
   - Suite de regresión de fases y habilidades ejecutada con comando `bd-test-phases`: 10/10 checks verificados con apagado limpio exitoso (`exit code 0`).
+
+---
+
+## 6. Estado de la Fase 3.7 y 3.7-R1 (Death / Victory) — `COMPLETE`
+
+- **Modelos y Eventos de Victoria (`maurxp.betterdragon.battle` y `maurxp.betterdragon.battle.event`):**
+  - `BetterDragonVictoryEvent`: Evento Bukkit público e informativo (no cancelable) emitido exclusivamente tras alcanzar el estado final `COMPLETED`.
+  - `VictoryEventDispatcher`: Interfaz funcional que desacopla el despacho de eventos de Bukkit para pruebas unitarias puras.
+  - `BattleResult`: Porta `CombatSnapshot` inmutable (con lista completa de `ParticipantSnapshot`, secuencias y daño acumulado) y constructores `completed(...)` que aseguran inmutabilidad y thread-safety sin retener objetos Bukkit mutables (`Player`, `Entity`, `World`).
+- **Correcciones Quirúrgicas de Auditoría R1 (Fase 3.7-R1):**
+  - *Encapsulación Estricta de Runtime:* Se removió `BattleSession session` y el método `getSession()` de `BetterDragonVictoryEvent`. El evento expone exclusivamente datos inmutables y seguros de dominio (`BattleId`, `BattleResult`, `worldName`), evitando la filtración de runtime mutable hacia la API pública.
+  - *Criterio Estricto del Slayer (2 Criterios):* Se eliminó el tercer criterio de desempate por UUID lexicográfico en `CombatRuntime.TOP_DAMAGE_COMPARATOR`. El comparator evalúa única y exclusivamente:
+    1. Mayor daño acumulado (`totalDamage DESC`).
+    2. Menor secuencia de impacto inicial (`firstHitSequence ASC`).
+  - *Control Soberano sobre Recompensas Vanilla:*
+    - Al morir un dragón administrado, se suprimen explícitamente los drops vanilla (`deathEvent.getDrops().clear()`) y la experiencia (`deathEvent.setDroppedExp(0)`) para que no interfieran con el futuro sistema de Rewards de BetterDragon.
+    - Dragones vanilla (no administrados) permanecen 100% inalterados: ni su experiencia ni sus drops son suprimidos, y no disparan lógica de BetterDragon.
+  - *Independencia de Dragon Egg y Primera Victoria:*
+    - BetterDragon no consulta `DragonBattle` ni `EnderDragonFight` (`hasBeenPreviouslyKilled()`, `dragonKilled`).
+    - En esta fase no se spawnea manualmente ningún Dragon Egg ni se altera el estado del mundo; el ciclo de vida del huevo y el concepto de primera victoria quedan reservados al sistema propio de BetterDragon en fases posteriores (Rewards, Persistence, Portal).
+- **Pruebas Unitarias:**
+  - `BattleVictoryTest`: 20 pruebas unitarias exhaustivas que cubren detección de PDC, no-ops de dragones no administrados, progresión de estados, idempotencia de muerte, Slayer `TOP_DAMAGE` con 2 criterios sin desempate por UUID, encapsulación del evento de victoria, supresión de XP/drops en dragones administrados, no intervención en dragones vanilla, independencia de `DragonBattle` y preservación de participantes offline.
+  - **Total de pruebas unitarias:** 198 pruebas ejecutadas en Maven, 0 fallos, 0 errores, 0 omitidos.
+- **Validación Runtime (Paper 26.1.2-74):**
+  - Suite de integración de victoria ejecutada con script headless `run_victory_suite.py` invocando `bd-test-victory`:
+    - Spawn de BetterDragon y verificación de PDC (Check 1 & 2).
+    - Registro de daño multidimensional con 3 participantes (Check 3).
+    - Muerte física real mediante daño letal / `EntityDeathEvent`.
+    - Supresión de 12,000 XP y drops vanilla.
+    - Emisión exitosa de `BetterDragonVictoryEvent` encapsulado (Check 5).
+    - Transición final a `BattleSession = COMPLETED` (Check 6).
+    - Consistencia y estructura de `BattleResult` y `CombatSnapshot` (Check 7).
+    - Verificación del Slayer `TOP_DAMAGE` (PlayerTwo_Slayer con 250.0 daño) (Check 8).
+    - Verificación de idempotencia ante segunda invocación (Check 9).
+    - Salida limpia del servidor con exit code 0.
+  - Suites de regresión completas ejecutadas exitosamente:
+    - `run_phases_suite.py`: 10/10 checks pasados (exit code 0).
+    - `run_arena_suite.py`: 8/8 checks pasados (exit code 0).

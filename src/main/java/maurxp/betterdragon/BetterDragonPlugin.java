@@ -18,7 +18,9 @@ import maurxp.betterdragon.battle.BattleSessionManager;
 import maurxp.betterdragon.battle.DragonLifecycleListener;
 import maurxp.betterdragon.battle.DragonPdcHandler;
 import maurxp.betterdragon.battle.DragonSpawner;
+import maurxp.betterdragon.battle.event.BetterDragonVictoryEvent;
 import maurxp.betterdragon.battle.model.BattleId;
+import maurxp.betterdragon.battle.model.BattleResult;
 import maurxp.betterdragon.battle.model.BattleState;
 import maurxp.betterdragon.battle.model.DragonIdentity;
 import maurxp.betterdragon.combat.CombatRuntime;
@@ -260,6 +262,9 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
         } else if (cmd.equalsIgnoreCase("bd-test-arena")) {
             event.setCancelled(true);
             runArenaVerification(event.getSender());
+        } else if (cmd.equalsIgnoreCase("bd-test-victory")) {
+            event.setCancelled(true);
+            runVictoryVerification(event.getSender());
         }
     }
 
@@ -407,10 +412,10 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
                 dragon.setHealth(0.0);
 
                 // Tras la muerte síncrona en el hilo principal, EntityDeathEvent debe haber
-                // transicionado la sesión a DYING
-                if (session.getState() != BattleState.DYING) {
+                // transicionado la sesión a DYING/COMPLETED
+                if (session.getState() != BattleState.DYING && session.getState() != BattleState.COMPLETED) {
                     getLogger().severe(
-                            "[LIFECYCLE-TEST-FAIL] La sesión no transicionó a DYING tras la muerte. Estado actual: "
+                            "[LIFECYCLE-TEST-FAIL] La sesión no transicionó a DYING/COMPLETED tras la muerte. Estado actual: "
                                     + session.getState());
                     return;
                 }
@@ -594,18 +599,18 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
                 getLogger().info(
                         "[COMBAT-CHECK-12] CombatSnapshot inmutable verificado: 3 participantes, 320.0 daño total, sequence=5.");
 
-                // M. Rechazo de daño tras muerte física (DYING)
+                // M. Rechazo de daño tras muerte física (DYING/COMPLETED)
                 dragon.setHealth(0.0);
-                if (session.getState() != BattleState.DYING) {
+                if (session.getState() != BattleState.DYING && session.getState() != BattleState.COMPLETED) {
                     getLogger()
-                            .severe("[COMBAT-TEST-FAIL] La sesión no transicionó a DYING tras la muerte del dragón.");
+                            .severe("[COMBAT-TEST-FAIL] La sesión no transicionó a DYING/COMPLETED tras la muerte del dragón.");
                     return;
                 }
                 if (runtime.recordDamage(p1, "Mauricio_Updated", 10.0, 200L).isPresent()) {
-                    getLogger().severe("[COMBAT-TEST-FAIL] Se aceptó daño contra un dragón en estado DYING.");
+                    getLogger().severe("[COMBAT-TEST-FAIL] Se aceptó daño contra un dragón en estado post-muerte.");
                     return;
                 }
-                getLogger().info("[COMBAT-CHECK-13] Daño rechazado correctamente tras transicionar a DYING.");
+                getLogger().info("[COMBAT-CHECK-13] Daño rechazado correctamente tras transicionar a DYING/COMPLETED.");
 
                 getLogger().info("==================================================");
                 getLogger().info("=== ALL COMBAT RUNTIME VERIFICATION CHECKS PASSED! ===");
@@ -762,13 +767,13 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
                 }
                 getLogger().info("[PHASES-CHECK-9] Aislamiento de sesiones verificado: sesión 2 permanece en phase_1 independientemente de sesión 1.");
 
-                // 10. Muerte transiciona limpiamente a DYING
+                // 10. Muerte transiciona limpiamente a DYING/COMPLETED
                 dragon.setHealth(0.0);
-                if (session.getState() != BattleState.DYING) {
-                    getLogger().severe("[PHASES-TEST-FAIL] La sesión no transicionó a DYING tras la muerte del dragón.");
+                if (session.getState() != BattleState.DYING && session.getState() != BattleState.COMPLETED) {
+                    getLogger().severe("[PHASES-TEST-FAIL] La sesión no transicionó a DYING/COMPLETED tras la muerte del dragón.");
                     return;
                 }
-                getLogger().info("[PHASES-CHECK-10] Transición terminal a DYING preservada.");
+                getLogger().info("[PHASES-CHECK-10] Transición terminal a DYING/COMPLETED preservada.");
 
                 getLogger().info("==================================================");
                 getLogger().info("=== ALL PHASES & ABILITIES VERIFICATION PASSED! ===");
@@ -949,6 +954,162 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
         } catch (Exception e) {
             getLogger().log(Level.SEVERE,
                     "[ARENA-TEST-ERROR] Excepción inesperada durante la verificación de arena: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Ejecuta la suite de verificación runtime de Death / Victory (Fase 3.7).
+     */
+    private void runVictoryVerification(CommandSender sender) {
+        getLogger().info("==================================================");
+        getLogger().info("  INICIANDO VERIFICACIÓN DE DEATH / VICTORY (3.7)  ");
+        getLogger().info("==================================================");
+
+        try {
+            World endWorld = null;
+            for (World w : Bukkit.getWorlds()) {
+                if (w.getEnvironment() == World.Environment.THE_END) {
+                    endWorld = w;
+                    break;
+                }
+            }
+
+            if (endWorld == null) {
+                getLogger().severe("[VICTORY-TEST-FAIL] No se encontró ningún mundo THE_END cargado.");
+                return;
+            }
+
+            endWorld.getChunkAt(0, 0).load();
+            endWorld.addPluginChunkTicket(0, 0, this);
+
+            try {
+                // 1. Crear / spawn de dragón BetterDragon y verificar estado ACTIVE
+                BattleSession session = battleManager.startBattle(endWorld);
+                if (session.getState() != BattleState.ACTIVE) {
+                    getLogger().severe("[VICTORY-TEST-FAIL] La sesión no pasó al estado ACTIVE tras el spawn.");
+                    return;
+                }
+                Optional<DragonIdentity> identityOpt = session.getDragonIdentity();
+                if (identityOpt.isEmpty()) {
+                    getLogger().severe("[VICTORY-TEST-FAIL] DragonIdentity ausente en la sesión.");
+                    return;
+                }
+                EnderDragon dragon = (EnderDragon) Bukkit.getEntity(identityOpt.get().entityUniqueId());
+                if (dragon == null || !dragon.isValid()) {
+                    getLogger().severe("[VICTORY-TEST-FAIL] Entidad del dragón no válida.");
+                    return;
+                }
+                getLogger().info("[VICTORY-CHECK-1] Dragón BetterDragon spawneado y sesión ACTIVE (ID: " + session.getBattleId() + ")");
+
+                // 2. Confirmar identidad PDC (managed=true y battle_id)
+                if (!DragonPdcHandler.isBetterDragon(dragon)) {
+                    getLogger().severe("[VICTORY-TEST-FAIL] El dragón no tiene la firma PDC válida de BetterDragon.");
+                    return;
+                }
+                Optional<DragonIdentity> dragonIdentityOpt = DragonPdcHandler.extractIdentity(dragon);
+                if (dragonIdentityOpt.isEmpty() || !dragonIdentityOpt.get().battleId().equals(session.getBattleId())) {
+                    getLogger().severe("[VICTORY-TEST-FAIL] BattleId en PDC no coincide con la sesión.");
+                    return;
+                }
+                getLogger().info("[VICTORY-CHECK-2] Identidad PDC confirmada (managed=true, battle_id=" + session.getBattleId() + ")");
+
+                // 3. Registrar daño de participantes para verificar TOP_DAMAGE y desempate determinista
+                CombatRuntime runtime = session.getCombatRuntime();
+                UUID p1 = UUID.randomUUID(); // 100.0 de daño, primer hit seq 1
+                UUID p2 = UUID.randomUUID(); // 250.0 de daño -> SLAYER
+                UUID p3 = UUID.randomUUID(); // offline/otro, 50.0 daño
+                runtime.recordDamage(p1, "PlayerOne", 100.0, 10L);
+                runtime.recordDamage(p2, "PlayerTwo_Slayer", 150.0, 15L);
+                runtime.recordDamage(p3, "PlayerThree_Offline", 50.0, 20L);
+                runtime.recordDamage(p2, "PlayerTwo_Slayer", 100.0, 25L); // p2 total = 250.0
+                getLogger().info("[VICTORY-CHECK-3] Participantes registrados: p1=100.0, p2=250.0 (esperado Slayer), p3=50.0");
+
+                // Registrar listener para contar BetterDragonVictoryEvent
+                java.util.concurrent.atomic.AtomicInteger victoryEventCount = new java.util.concurrent.atomic.AtomicInteger(0);
+                java.util.concurrent.atomic.AtomicReference<BetterDragonVictoryEvent> receivedEvent = new java.util.concurrent.atomic.AtomicReference<>();
+                Listener victoryListener = new Listener() {
+                    @EventHandler
+                    public void onVictory(BetterDragonVictoryEvent event) {
+                        victoryEventCount.incrementAndGet();
+                        receivedEvent.set(event);
+                    }
+                };
+                getServer().getPluginManager().registerEvents(victoryListener, this);
+
+                try {
+                    // 4. Simular / ejecutar muerte válida (setHealth(0.0) dispara EntityDeathEvent síncronamente)
+                    dragon.setHealth(0.0);
+
+                    // 5. Verificar BetterDragonVictoryEvent
+                    if (victoryEventCount.get() != 1 || receivedEvent.get() == null) {
+                        getLogger().severe("[VICTORY-TEST-FAIL] BetterDragonVictoryEvent no fue emitido exactamente una vez. Conteo: " + victoryEventCount.get());
+                        return;
+                    }
+                    BetterDragonVictoryEvent event = receivedEvent.get();
+                    if (!event.getBattleId().equals(session.getBattleId())) {
+                        getLogger().severe("[VICTORY-TEST-FAIL] BattleId en BetterDragonVictoryEvent no coincide.");
+                        return;
+                    }
+                    getLogger().info("[VICTORY-CHECK-5] BetterDragonVictoryEvent emitido correctamente con battleId: " + event.getBattleId());
+
+                    // 6. Verificar BattleSession = COMPLETED
+                    if (session.getState() != BattleState.COMPLETED) {
+                        getLogger().severe("[VICTORY-TEST-FAIL] La sesión no terminó en estado COMPLETED. Estado actual: " + session.getState());
+                        return;
+                    }
+                    getLogger().info("[VICTORY-CHECK-6] BattleSession finalizada en estado COMPLETED.");
+
+                    // 7. Verificar BattleResult
+                    Optional<BattleResult> resultOpt = session.getResult();
+                    if (resultOpt.isEmpty() || !resultOpt.get().isVictory()) {
+                        getLogger().severe("[VICTORY-TEST-FAIL] BattleResult nulo o estado incorrecto.");
+                        return;
+                    }
+                    BattleResult result = resultOpt.get();
+                    if (result.combatSnapshot() == null || result.combatSnapshot().participants().size() != 3) {
+                        getLogger().severe("[VICTORY-TEST-FAIL] CombatSnapshot en BattleResult no contiene los 3 participantes.");
+                        return;
+                    }
+                    getLogger().info("[VICTORY-CHECK-7] BattleResult verificado: Status=COMPLETED, totalDamage=" + result.combatSnapshot().totalDamage());
+
+                    // 8. Verificar Slayer (TOP_DAMAGE = p2)
+                    if (result.slayerUniqueId() == null || !result.slayerUniqueId().equals(p2)) {
+                        getLogger().severe("[VICTORY-TEST-FAIL] Slayer incorrecto en BattleResult. Esperado: " + p2 + ", actual: " + result.slayerUniqueId());
+                        return;
+                    }
+                    if (!"PlayerTwo_Slayer".equals(result.slayerLastKnownName())) {
+                        getLogger().severe("[VICTORY-TEST-FAIL] SlayerName incorrecto. Actual: " + result.slayerLastKnownName());
+                        return;
+                    }
+                    getLogger().info("[VICTORY-CHECK-8] Slayer TOP_DAMAGE verificado: p2 (" + result.slayerLastKnownName() + ") con 250.0 daño.");
+
+                    // 9. Verificar que segunda finalización no duplica resultado/evento (Idempotencia)
+                    Optional<BattleResult> secondCallOpt = battleManager.handleDragonDeath(dragon, null);
+                    if (secondCallOpt.isEmpty() || secondCallOpt.get() != result) {
+                        getLogger().severe("[VICTORY-TEST-FAIL] Segunda invocación no devolvió el mismo BattleResult en caché.");
+                        return;
+                    }
+                    if (victoryEventCount.get() != 1) {
+                        getLogger().severe("[VICTORY-TEST-FAIL] Segunda invocación disparó un evento duplicado. Conteo: " + victoryEventCount.get());
+                        return;
+                    }
+                    getLogger().info("[VICTORY-CHECK-9] Idempotencia estricta confirmada: 0 eventos duplicados y mismo BattleResult inmutable devuelto.");
+
+                } finally {
+                    org.bukkit.event.HandlerList.unregisterAll(victoryListener);
+                }
+
+                getLogger().info("==================================================");
+                getLogger().info("=== ALL DEATH / VICTORY VERIFICATION CHECKS PASSED! ===");
+                getLogger().info("==================================================");
+
+                Bukkit.getScheduler().runTask(this, Bukkit::shutdown);
+            } finally {
+                endWorld.removePluginChunkTicket(0, 0, this);
+            }
+        } catch (Exception e) {
+            getLogger().log(Level.SEVERE,
+                    "[VICTORY-TEST-ERROR] Excepción inesperada durante la verificación de victoria: " + e.getMessage(), e);
         }
     }
 }

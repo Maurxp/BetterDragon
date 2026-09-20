@@ -242,17 +242,17 @@ class CombatRuntimeTest {
     }
 
     @Test
-    @DisplayName("17. Empate tiene comportamiento determinista documentado (menor firstHitSequence gana)")
+    @DisplayName("17. Empate tiene comportamiento determinista documentado (menor firstHitSequence gana sin tercer criterio)")
     void testDeterministicTieBreaking() {
-        UUID p1 = UUID.randomUUID();
-        UUID p2 = UUID.randomUUID();
+        UUID p1 = UUID.fromString("ffffffff-ffff-ffff-ffff-ffffffffffff");
+        UUID p2 = UUID.fromString("00000000-0000-0000-0000-000000000000");
 
         runtime.recordDamage(p1, "P1", 100.0, 100L); // seq 1
         runtime.recordDamage(p2, "P2", 100.0, 110L); // seq 2
 
         // Ambos tienen 100.0 de daño, pero p1 golpeó primero (seq 1 < 2)
         ParticipantSnapshot top = runtime.getTopDamageParticipant().orElseThrow();
-        assertEquals(p1, top.playerId(), "P1 debe ganar el desempate por menor firstHitSequence");
+        assertEquals(p1, top.playerId(), "P1 debe ganar el desempate por menor firstHitSequence a pesar de UUID lexicográficamente mayor");
     }
 
     @Test

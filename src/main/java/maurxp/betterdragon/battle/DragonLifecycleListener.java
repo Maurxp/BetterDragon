@@ -46,42 +46,22 @@ public class DragonLifecycleListener implements Listener {
     }
 
     /**
-     * Detecta la muerte natural del EnderDragon administrado por BetterDragon.
+     * Detecta la muerte natural del EnderDragon administrado por BetterDragon y delega
+     * en BattleManager para finalizar la batalla con victoria.
      */
     @EventHandler(priority = EventPriority.HIGH)
     public void onEntityDeath(EntityDeathEvent event) {
-        Entity entity = event.getEntity();
-        Optional<DragonIdentity> identityOpt = DragonPdcHandler.extractIdentity(entity);
+        if (!(event.getEntity() instanceof EnderDragon dragon)) {
+            return;
+        }
 
+        Optional<DragonIdentity> identityOpt = DragonPdcHandler.extractIdentity(dragon);
         if (identityOpt.isEmpty()) {
-            // No es un dragón de BetterDragon; ignorar completamente
+            // No es un dragón de BetterDragon; ignorar completamente sin spam
             return;
         }
 
-        DragonIdentity identity = identityOpt.get();
-        Optional<BattleSession> sessionOpt = sessionManager.getSession(identity.battleId());
-
-        if (sessionOpt.isEmpty()) {
-            logger.warning("[BetterDragon] Detectada muerte de dragón con BattleId " + identity.battleId()
-                    + " pero no existe una sesión registrada en memoria.");
-            return;
-        }
-
-        BattleSession session = sessionOpt.get();
-        if (session.getState() == BattleState.ACTIVE) {
-            logger.info("[BetterDragon] EnderDragon de la batalla " + identity.battleId()
-                    + " ha muerto naturalmente. Transicionando ACTIVE -> DYING...");
-
-            // 1. Cancelar XP vanilla masiva (12,000 XP) para evitar duplicación con el sistema propio
-            event.setDroppedExp(0);
-
-            // 2. Limpiar drops vanilla (evita duplicación de huevo de dragón / portales vanilla)
-            event.getDrops().clear();
-            logger.info("[BetterDragon] Cancelando 12000 XP vanilla y drops para el dragón de la batalla " + identity.battleId());
-
-            // 3. Transicionar ciclo de vida a DYING
-            session.beginDying();
-        }
+        battleManager.handleDragonDeath(dragon, event);
     }
 
     /**

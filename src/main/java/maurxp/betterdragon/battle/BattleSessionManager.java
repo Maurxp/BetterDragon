@@ -46,7 +46,7 @@ public class BattleSessionManager {
             throw new IllegalStateException("Ya existe una sesión registrada con el ID: " + id);
         }
 
-        if (activeSessionByWorld.containsKey(world)) {
+        if (hasActiveSession(world)) {
             throw new IllegalStateException("Ya existe una sesión de batalla activa para el mundo: " + world);
         }
 
@@ -79,7 +79,11 @@ public class BattleSessionManager {
             return Optional.empty();
         }
         BattleId id = activeSessionByWorld.get(worldName);
-        return id != null ? Optional.ofNullable(sessionsById.get(id)) : Optional.empty();
+        if (id == null) {
+            return Optional.empty();
+        }
+        BattleSession session = sessionsById.get(id);
+        return (session != null && !session.isTerminal()) ? Optional.of(session) : Optional.empty();
     }
 
     /**
@@ -93,17 +97,29 @@ public class BattleSessionManager {
             return Optional.empty();
         }
         BattleId id = activeSessionByWorldId.get(worldUniqueId);
-        return id != null ? Optional.ofNullable(sessionsById.get(id)) : Optional.empty();
+        if (id == null) {
+            return Optional.empty();
+        }
+        BattleSession session = sessionsById.get(id);
+        return (session != null && !session.isTerminal()) ? Optional.of(session) : Optional.empty();
     }
 
     /**
      * Comprueba si existe una sesión activa registrada para el mundo indicado.
      *
      * @param worldName nombre del mundo
-     * @return true si hay una sesión activa
+     * @return true si hay una sesión activa no terminal
      */
     public boolean hasActiveSession(String worldName) {
-        return worldName != null && activeSessionByWorld.containsKey(worldName);
+        if (worldName == null) {
+            return false;
+        }
+        BattleId id = activeSessionByWorld.get(worldName);
+        if (id == null) {
+            return false;
+        }
+        BattleSession session = sessionsById.get(id);
+        return session != null && !session.isTerminal();
     }
 
     /**

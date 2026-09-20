@@ -1,5 +1,7 @@
 package maurxp.betterdragon.battle.model;
 
+import maurxp.betterdragon.combat.CombatSnapshot;
+
 import java.io.Serializable;
 import java.time.Duration;
 import java.time.Instant;
@@ -19,6 +21,7 @@ import java.util.UUID;
  * @param endTime             momento de conclusión o terminación
  * @param slayerUniqueId      UUID del jugador con mayor daño acumulado (TOP_DAMAGE) si la batalla fue completada
  * @param slayerLastKnownName snapshot del nombre del Slayer al momento de la victoria
+ * @param combatSnapshot      instantánea inmutable del combate con lista completa de participantes
  * @param abortReason         motivo de cancelación si la batalla fue abortada
  * @author maurxp
  */
@@ -29,6 +32,7 @@ public record BattleResult(
         Instant endTime,
         UUID slayerUniqueId,
         String slayerLastKnownName,
+        CombatSnapshot combatSnapshot,
         String abortReason
 ) implements Serializable {
 
@@ -48,6 +52,37 @@ public record BattleResult(
     }
 
     /**
+     * Construye un resultado exitoso de batalla completada con instantánea de combate.
+     *
+     * @param battleId       identificador de batalla
+     * @param startTime      inicio
+     * @param endTime        fin
+     * @param slayerId       UUID del jugador con TOP_DAMAGE
+     * @param slayerName     nombre del Slayer
+     * @param combatSnapshot instantánea inmutable de combate con participantes
+     * @return resultado inmutable de batalla completada
+     */
+    public static BattleResult completed(
+            BattleId battleId,
+            Instant startTime,
+            Instant endTime,
+            UUID slayerId,
+            String slayerName,
+            CombatSnapshot combatSnapshot
+    ) {
+        return new BattleResult(
+                battleId,
+                BattleState.COMPLETED,
+                startTime,
+                endTime,
+                slayerId,
+                slayerName,
+                combatSnapshot,
+                null
+        );
+    }
+
+    /**
      * Construye un resultado exitoso de batalla completada.
      *
      * @param battleId       identificador de batalla
@@ -64,15 +99,7 @@ public record BattleResult(
             UUID slayerId,
             String slayerName
     ) {
-        return new BattleResult(
-                battleId,
-                BattleState.COMPLETED,
-                startTime,
-                endTime,
-                slayerId,
-                slayerName,
-                null
-        );
+        return completed(battleId, startTime, endTime, slayerId, slayerName, null);
     }
 
     /**
@@ -95,6 +122,7 @@ public record BattleResult(
                 BattleState.ABORTED,
                 startTime,
                 endTime,
+                null,
                 null,
                 null,
                 reason != null ? reason : "Cancelación sin motivo especificado"
@@ -125,6 +153,10 @@ public record BattleResult(
 
     public Optional<String> getSlayerLastKnownName() {
         return Optional.ofNullable(slayerLastKnownName);
+    }
+
+    public Optional<CombatSnapshot> getCombatSnapshot() {
+        return Optional.ofNullable(combatSnapshot);
     }
 
     public Optional<String> getAbortReason() {
