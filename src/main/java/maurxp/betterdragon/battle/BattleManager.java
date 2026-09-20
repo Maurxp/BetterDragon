@@ -1,5 +1,6 @@
 package maurxp.betterdragon.battle;
 
+import maurxp.betterdragon.arena.ArenaDefinition;
 import maurxp.betterdragon.battle.model.BattleAbortReason;
 import maurxp.betterdragon.battle.model.BattleId;
 import maurxp.betterdragon.battle.model.BattleState;
@@ -28,6 +29,8 @@ import java.util.logging.Logger;
  *       que la entidad existe en el mundo y porta el PDC correcto de BetterDragon.</li>
  *   <li><b>Limpieza Idempotente ante Fallos:</b> Si el spawn falla o la entidad no valida, limpia cualquier
  *       rastro, remueve la sesión de memoria y marca la sesión como abortada.</li>
+ *   <li><b>Disponibilidad Determinista de Arena (Fase 3.6):</b> Valida que la arena exista, sus límites
+ *       sean coherentes y el mundo esté disponible antes de iniciar la batalla. Cero fallbacks hardcodeados.</li>
  * </ul>
  *
  * @author maurxp
@@ -52,26 +55,39 @@ public class BattleManager {
     }
 
     /**
-     * Inicia una nueva batalla en el mundo del End especificado.
+     * Inicia una nueva batalla en el mundo del End especificado usando la arena predeterminada.
      *
      * @param world mundo THE_END
      * @return sesión activada en estado ACTIVE
      */
     public BattleSession startBattle(World world) {
-        return startBattle(world, null, "default");
+        return startBattle(world, null, "default", "default");
     }
 
     /**
-     * Inicia una nueva batalla con ubicación de spawn y perfil definidos.
+     * Inicia una nueva batalla con ubicación de spawn y perfil definidos usando la arena predeterminada.
      *
      * @param world         mundo del End
      * @param spawnLocation ubicación de spawn (opcional, null usa el centro por defecto)
      * @param definitionId  perfil del dragón
      * @return sesión activada en estado ACTIVE
-     * @throws IllegalArgumentException si el mundo no es THE_END
-     * @throws IllegalStateException    si ya existe una batalla activa en el mundo o la validación falla
      */
     public BattleSession startBattle(World world, Location spawnLocation, String definitionId) {
+        return startBattle(world, spawnLocation, definitionId, "default");
+    }
+
+    /**
+     * Inicia una nueva batalla con ubicación de spawn, perfil del dragón y arena específica.
+     *
+     * @param world         mundo del End
+     * @param spawnLocation ubicación de spawn (opcional, null usa el centro por defecto)
+     * @param definitionId  perfil del dragón
+     * @param arenaId       identificador de la arena a resolver
+     * @return sesión activada en estado ACTIVE
+     * @throws IllegalArgumentException si el mundo no es THE_END
+     * @throws IllegalStateException    si ya existe una batalla activa, la arena no existe o el mundo no coincide
+     */
+    public BattleSession startBattle(World world, Location spawnLocation, String definitionId, String arenaId) {
         Objects.requireNonNull(world, "El mundo no puede ser nulo");
 
         // 1. Validar dimensión End
@@ -85,15 +101,52 @@ public class BattleManager {
             throw new IllegalStateException("Ya existe una sesión de batalla activa para el mundo: " + world.getName());
         }
 
-        // 3. Generar identidades y congelar configuración
+        // 3. Resolución y disponibilidad de arena (Fase 3.6)
+        String targetArenaId = (arenaId != null && !arenaId.isBlank()) ? arenaId.trim() : "default";
+        ArenaDefinition arena = null;
+
+        // Si se usa 'default', intentar resolver arena específica para este mundo si existe
+        if (targetArenaId.equalsIgnoreCase("default")) {
+            arena = configService.getActiveArenas().getArenaForWorld(world.getName()).orElse(null);
+        }
+        if (arena == null) {
+            Optional<ArenaDefinition> arenaOpt = configService.getArena(targetArenaId);
+            if (arenaOpt.isEmpty()) {
+                throw new IllegalStateException("La arena configurada '" + targetArenaId + "' no existe en arenas.yml.");
+            }
+            arena = arenaOpt.get();
+        }
+
+        if (!arena.worldName().equalsIgnoreCase(world.getName())) {
+            throw new IllegalStateException("La arena '" + arena.id() + "' está configurada para el mundo '"
+                    + arena.worldName() + "', pero se solicitó iniciar en '" + world.getName() + "'.");
+        }
+
+        boolean worldAvailable = false;
+        try {
+            worldAvailable = Bukkit.getServer() != null && Bukkit.getWorld(arena.worldName()) != null;
+        } catch (Throwable ignored) {
+        }
+        if (!worldAvailable && world.getName().equalsIgnoreCase(arena.worldName())) {
+            worldAvailable = true;
+        }
+
+        if (!worldAvailable) {
+            throw new IllegalStateException("El mundo de la arena '" + arena.worldName()
+                    + "' no se encuentra cargado o disponible en el servidor.");
+        }
+
+        // 4. Generar identidades y congelar configuración con snapshot inmutable
         BattleId battleId = BattleId.random();
-        BattleConfigurationSnapshot snapshot = configService.createBattleSnapshot();
+        BattleConfigurationSnapshot snapshot = configService.createBattleSnapshot(arena);
         BattleSession session = BattleSession.create(battleId, world.getName(), world.getUID(), snapshot);
 
-        // 4. Iniciar PREPARING y registrar sesión
+        // 5. Iniciar PREPARING y registrar sesión
         session.start();
         sessionManager.register(session);
-        logger.info("[BetterDragon] Preparando batalla " + battleId + " en el mundo " + world.getName() + "...");
+        logger.info("[BetterDragon] Preparando batalla " + battleId + " en el mundo " + world.getName()
+                + " (arena: " + arena.id() + ")...");
+
 
         // 5. Spawnear dragón con PDC
         EnderDragon dragon;

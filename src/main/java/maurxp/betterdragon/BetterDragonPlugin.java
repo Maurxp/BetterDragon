@@ -1,7 +1,17 @@
 package maurxp.betterdragon;
 
+import maurxp.betterdragon.ability.AbilityDefinition;
+import maurxp.betterdragon.ability.AbilityEffectType;
 import maurxp.betterdragon.ability.AbilityEngine;
 import maurxp.betterdragon.ability.AbilityTrigger;
+import maurxp.betterdragon.ability.BattleSpatialContext;
+import maurxp.betterdragon.ability.EffectOriginType;
+import maurxp.betterdragon.ability.TargetSelector;
+import maurxp.betterdragon.ability.TargetSelectorType;
+import maurxp.betterdragon.arena.ArenaBounds;
+import maurxp.betterdragon.arena.ArenaDefinition;
+import maurxp.betterdragon.arena.ArenaRuleEvaluator;
+import maurxp.betterdragon.arena.Vector3d;
 import maurxp.betterdragon.battle.BattleManager;
 import maurxp.betterdragon.battle.BattleSession;
 import maurxp.betterdragon.battle.BattleSessionManager;
@@ -15,6 +25,7 @@ import maurxp.betterdragon.combat.CombatRuntime;
 import maurxp.betterdragon.combat.CombatSnapshot;
 import maurxp.betterdragon.combat.DragonCombatListener;
 import maurxp.betterdragon.combat.ParticipantSnapshot;
+import maurxp.betterdragon.config.ArenaConfigurationSnapshot;
 import maurxp.betterdragon.config.ConfigurationService;
 import maurxp.betterdragon.phase.PhaseRuntime;
 import maurxp.betterdragon.platform.bossbar.BossBarWorldListener;
@@ -27,15 +38,19 @@ import org.bukkit.World;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.server.ServerCommandEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
+import java.util.List;
 import java.util.Optional;
+import java.util.Random;
 import java.util.UUID;
 import java.util.logging.Level;
+
 
 /**
  * Clase principal de arranque y ciclo de vida de BetterDragon.
@@ -72,9 +87,13 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
         try {
             // 1. Cargar configuración base tipada y validada
             saveDefaultConfig();
+            File arenasFile = new File(getDataFolder(), "arenas.yml");
+            if (!arenasFile.exists()) {
+                saveResource("arenas.yml", false);
+            }
             this.configurationService = new ConfigurationService(getLogger());
             File configFile = new File(getDataFolder(), "config.yml");
-            this.configurationService.loadInitial(configFile);
+            this.configurationService.loadInitial(configFile, arenasFile);
 
             // 2. Inicializar controlador de plataforma para BossBar vanilla
             // (Infraestructura obligatoria)
@@ -149,8 +168,8 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
     }
 
     /**
-     * Recarga atómicamente la configuración global desde el archivo
-     * {@code config.yml}.
+     * Recarga atómicamente la configuración global y de arenas desde
+     * {@code config.yml} y {@code arenas.yml}.
      * Si la nueva configuración es inválida, se conserva la anterior intacta.
      *
      * @return true si la recarga fue exitosa y reemplazó la activa; false si fue
@@ -158,8 +177,10 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
      */
     public boolean reloadPluginConfig() {
         File configFile = new File(getDataFolder(), "config.yml");
-        return configurationService.reload(configFile);
+        File arenasFile = new File(getDataFolder(), "arenas.yml");
+        return configurationService.reload(configFile, arenasFile);
     }
+
 
     /**
      * Escanea todos los mundos actualmente cargados en el servidor y aplica la
@@ -236,8 +257,12 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
         } else if (cmd.equalsIgnoreCase("bd-test-phases")) {
             event.setCancelled(true);
             runPhasesVerification(event.getSender());
+        } else if (cmd.equalsIgnoreCase("bd-test-arena")) {
+            event.setCancelled(true);
+            runArenaVerification(event.getSender());
         }
     }
+
 
     /**
      * Ejecuta la suite de verificación física del ciclo de vida del dragón e
@@ -757,6 +782,173 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
         } catch (Exception e) {
             getLogger().log(Level.SEVERE,
                     "[PHASES-TEST-ERROR] Excepción inesperada durante la verificación de fases: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Ejecuta la suite de verificación runtime de Arena & Rules (Fase 3.6).
+     */
+    private void runArenaVerification(CommandSender sender) {
+        getLogger().info("==================================================");
+        getLogger().info("  INICIANDO VERIFICACIÓN DE ARENA & RULES (3.6)");
+        getLogger().info("==================================================");
+
+        try {
+            World endWorld = null;
+            for (World w : Bukkit.getWorlds()) {
+                if (w.getEnvironment() == World.Environment.THE_END) {
+                    endWorld = w;
+                    break;
+                }
+            }
+
+            if (endWorld == null) {
+                getLogger().severe("[ARENA-TEST-FAIL] No se encontró ningún mundo THE_END cargado.");
+                return;
+            }
+
+            endWorld.getChunkAt(0, 0).load();
+            endWorld.addPluginChunkTicket(0, 0, this);
+
+            try {
+                // 1. Carga de arenas.yml y existencia de arena default
+                ArenaConfigurationSnapshot arenas = configurationService.getActiveArenas();
+                Optional<ArenaDefinition> defaultArenaOpt = arenas.getArena("default");
+                if (defaultArenaOpt.isEmpty()) {
+                    getLogger().severe("[ARENA-TEST-FAIL] La arena 'default' no fue cargada desde arenas.yml.");
+                    return;
+                }
+                ArenaDefinition defaultArena = defaultArenaOpt.get();
+                getLogger().info("[ARENA-CHECK-1] Arena 'default' cargada correctamente de arenas.yml (world: "
+                        + defaultArena.worldName() + ").");
+
+                // 2. Independencia estricta de centros (center vs podium)
+                Vector3d center = defaultArena.center();
+                Vector3d podium = defaultArena.podium();
+                if (center.equals(podium)) {
+                    getLogger().severe("[ARENA-TEST-FAIL] El centro de la arena y el podio están conflados.");
+                    return;
+                }
+                if (center.y() <= podium.y()) {
+                    getLogger().severe("[ARENA-TEST-FAIL] Incoherencia vertical de centros: center Y (" + center.y()
+                            + ") no es mayor que podium Y (" + podium.y() + ").");
+                    return;
+                }
+                getLogger().info("[ARENA-CHECK-2] Centros independientes verificados: arena center Y="
+                        + center.y() + ", podium Y=" + podium.y() + ".");
+
+                // 3. Verificación de Bounding Box y contención
+                ArenaBounds bounds = defaultArena.bounds();
+                if (!bounds.contains(center) || !bounds.contains(podium)) {
+                    getLogger().severe("[ARENA-TEST-FAIL] Center o podium están fuera de los límites de la arena.");
+                    return;
+                }
+                Location insideLoc = new Location(endWorld, 50.0, 70.0, 50.0);
+                Location outsideLoc = new Location(endWorld, 500.0, 70.0, 500.0);
+                if (!bounds.contains(insideLoc) || bounds.contains(outsideLoc)) {
+                    getLogger().severe("[ARENA-TEST-FAIL] Falla en la evaluación de límites bounds.contains.");
+                    return;
+                }
+                getLogger().info("[ARENA-CHECK-3] ArenaBounds verificados: (50, 70, 50) dentro, (500, 70, 500) fuera.");
+
+                // 4. Iniciar batalla y verificar snapshot de arena congelado
+                BattleSession session = battleManager.startBattle(endWorld);
+                if (session.getState() != BattleState.ACTIVE) {
+                    getLogger().severe("[ARENA-TEST-FAIL] La batalla no inició en estado ACTIVE.");
+                    return;
+                }
+                if (!session.getArenaId().equals("default") || session.getArena() == null) {
+                    getLogger().severe("[ARENA-TEST-FAIL] La sesión de batalla no retiene la arena asociada.");
+                    return;
+                }
+                getLogger().info("[ARENA-CHECK-4] BattleSession iniciada con ArenaDefinition snapshot congelado.");
+
+                // 5. Resolución espacial mediante BattleSpatialContext y LocationResolver
+                BattleSpatialContext spatialContext = session.getSpatialContext();
+                Location resolvedArenaCenter = spatialContext.getArenaCenter(endWorld);
+                Location resolvedPodiumCenter = spatialContext.getPodiumCenter(endWorld);
+
+                if (resolvedArenaCenter.getX() != center.x() || resolvedArenaCenter.getY() != center.y()
+                        || resolvedArenaCenter.getZ() != center.z()) {
+                    getLogger().severe("[ARENA-TEST-FAIL] ARENA_CENTER resuelto (" + resolvedArenaCenter
+                            + ") no coincide con el centro configurado (" + center + ").");
+                    return;
+                }
+                if (resolvedPodiumCenter.getX() != podium.x() || resolvedPodiumCenter.getY() != podium.y()
+                        || resolvedPodiumCenter.getZ() != podium.z()) {
+                    getLogger().severe("[ARENA-TEST-FAIL] PODIUM_CENTER resuelto (" + resolvedPodiumCenter
+                            + ") no coincide con el podio configurado (" + podium + ").");
+                    return;
+                }
+                getLogger().info("[ARENA-CHECK-5] LocationResolver y SpatialContext resolvieron coordenadas reales sin fallbacks ficticios.");
+
+                // 6. TargetSelector con límites reales de arena
+                TargetSelector selector = new TargetSelector(spatialContext, new Random(12345L));
+                AbilityDefinition dummyAbility = new AbilityDefinition("dummy", AbilityTrigger.PERIODIC, 0L,
+                        TargetSelectorType.ALL_IN_ARENA, EffectOriginType.DRAGON_BODY, AbilityEffectType.SOUND);
+
+                List<Player> targets = selector.resolveTargets(TargetSelectorType.ALL_IN_ARENA,
+                        dummyAbility, endWorld, resolvedArenaCenter, session.getCombatRuntime(), Optional.empty());
+                getLogger().info("[ARENA-CHECK-6] TargetSelector.ALL_IN_ARENA evaluado con ArenaBounds (jugadores encontrados: "
+                        + targets.size() + ").");
+
+                // 7. ArenaRuleEvaluator: water denial, boundary, anti-tunnel
+                ArenaRuleEvaluator evaluator = new ArenaRuleEvaluator(session.getArena());
+                if (evaluator.isWaterAllowed(insideLoc)) {
+                    getLogger().severe("[ARENA-TEST-FAIL] Regla de denegación de agua falló: waterAllowed reportó true.");
+                    return;
+                }
+                if (!evaluator.isBoundaryViolated(outsideLoc) || evaluator.isBoundaryViolated(insideLoc)) {
+                    getLogger().severe("[ARENA-TEST-FAIL] Regla de frontera activa falló.");
+                    return;
+                }
+                if (!evaluator.isAntiTunnelActive()) {
+                    getLogger().severe("[ARENA-TEST-FAIL] Regla anti-túnel inactiva.");
+                    return;
+                }
+                getLogger().info("[ARENA-CHECK-7] ArenaRuleEvaluator verificado: water_denial=true, boundary=true, anti_tunnel=true.");
+
+                // 8. Reload Fail-Safe: archivo corrupto no altera configuración activa
+                File arenasFile = new File(getDataFolder(), "arenas.yml");
+                String originalContent = java.nio.file.Files.readString(arenasFile.toPath());
+                try {
+                    java.nio.file.Files.writeString(arenasFile.toPath(), "arenas:\n  default:\n    world: ''\n"); // Inválido
+                    boolean reloadResult = reloadPluginConfig();
+                    if (reloadResult) {
+                        getLogger().severe("[ARENA-TEST-FAIL] Se aceptó una configuración de arenas inválida en el reload.");
+                        return;
+                    }
+                    if (configurationService.getActiveArenas().getArena("default").isEmpty()) {
+                        getLogger().severe("[ARENA-TEST-FAIL] El reload inválido descartó la configuración previa activa.");
+                        return;
+                    }
+                    if (!session.getArena().id().equals("default")) {
+                        getLogger().severe("[ARENA-TEST-FAIL] La sesión de batalla activa fue alterada por el reload.");
+                        return;
+                    }
+                    getLogger().info("[ARENA-CHECK-8] Fail-Safe de reload confirmado: arenas.yml inválido rechazado y snapshot de batalla preservado.");
+                } finally {
+                    java.nio.file.Files.writeString(arenasFile.toPath(), originalContent);
+                    reloadPluginConfig();
+                }
+
+                // 9. Limpieza de dragón y término de sesión
+                EnderDragon dragon = (EnderDragon) Bukkit.getEntity(session.getDragonIdentity().orElseThrow().entityUniqueId());
+                if (dragon != null) {
+                    dragon.setHealth(0.0);
+                }
+
+                getLogger().info("==================================================");
+                getLogger().info("=== ALL ARENA & RULES VERIFICATION CHECKS PASSED! ===");
+                getLogger().info("==================================================");
+
+                Bukkit.getScheduler().runTask(this, Bukkit::shutdown);
+            } finally {
+                endWorld.removePluginChunkTicket(0, 0, this);
+            }
+        } catch (Exception e) {
+            getLogger().log(Level.SEVERE,
+                    "[ARENA-TEST-ERROR] Excepción inesperada durante la verificación de arena: " + e.getMessage(), e);
         }
     }
 }

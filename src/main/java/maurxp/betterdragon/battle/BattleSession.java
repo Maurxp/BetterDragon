@@ -1,6 +1,12 @@
 package maurxp.betterdragon.battle;
 
+import maurxp.betterdragon.ability.AbilityCooldownTracker;
 import maurxp.betterdragon.ability.AbilityEngine;
+import maurxp.betterdragon.ability.ArenaBattleSpatialContext;
+import maurxp.betterdragon.ability.BattleSpatialContext;
+import maurxp.betterdragon.ability.LocationResolver;
+import maurxp.betterdragon.ability.TargetSelector;
+import maurxp.betterdragon.arena.ArenaDefinition;
 import maurxp.betterdragon.battle.model.BattleAbortReason;
 import maurxp.betterdragon.battle.model.BattleId;
 import maurxp.betterdragon.battle.model.BattleResult;
@@ -14,6 +20,7 @@ import org.bukkit.entity.EnderDragon;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Random;
 import java.util.UUID;
 
 /**
@@ -31,7 +38,7 @@ import java.util.UUID;
  * de métodos de dominio explícitos que validan la máquina de estados.</li>
  * <li><b>Snapshot Inmutable:</b> Almacena un
  * {@link BattleConfigurationSnapshot} inmutable
- * que congela los parámetros de la batalla; recargas posteriores del plugin no
+ * que congela los parámetros de la batalla y la arena; recargas posteriores del plugin no
  * afectan la sesión.</li>
  * <li><b>Aislamiento de Persistencia:</b> No almacena referencias a entidades
  * Bukkit vivas
@@ -51,6 +58,7 @@ public class BattleSession {
     private final String worldName;
     private final UUID worldUniqueId;
     private final BattleConfigurationSnapshot configSnapshot;
+    private final BattleSpatialContext spatialContext;
     private final Instant createdAt;
     private final CombatRuntime combatRuntime;
     private final PhaseRuntime phaseRuntime;
@@ -71,13 +79,25 @@ public class BattleSession {
         this.createdAt = Instant.now();
         this.state = BattleState.IDLE;
         this.combatRuntime = new CombatRuntime(this);
-        this.abilityEngine = new AbilityEngine(configSnapshot.dragonDefinition().abilities(), null);
+        this.spatialContext = new ArenaBattleSpatialContext(configSnapshot.arenaDefinition());
+        AbilityCooldownTracker cooldownTracker = new AbilityCooldownTracker();
+        TargetSelector targetSelector = new TargetSelector(this.spatialContext, new Random());
+        LocationResolver locationResolver = new LocationResolver(this.spatialContext);
+        this.abilityEngine = new AbilityEngine(
+                configSnapshot.dragonDefinition().abilities(),
+                cooldownTracker,
+                targetSelector,
+                locationResolver,
+                null,
+                null
+        );
         this.phaseRuntime = new PhaseRuntime(this, configSnapshot.dragonDefinition().phases(), this.abilityEngine, null);
     }
 
     public BattleSession(BattleId battleId, String worldName, UUID worldUniqueId) {
         this(battleId, worldName, worldUniqueId, BattleConfigurationSnapshot.defaults());
     }
+
 
     /**
      * Fábrica para crear una nueva sesión de batalla en estado IDLE con snapshot
@@ -316,6 +336,33 @@ public class BattleSession {
      */
     public AbilityEngine getAbilityEngine() {
         return abilityEngine;
+    }
+
+    /**
+     * Retorna la definición de arena congelada para esta sesión de batalla.
+     *
+     * @return ArenaDefinition inmutable
+     */
+    public ArenaDefinition getArena() {
+        return configSnapshot.arenaDefinition();
+    }
+
+    /**
+     * Retorna el identificador de la arena asociada a esta batalla.
+     *
+     * @return identificador de la arena
+     */
+    public String getArenaId() {
+        return configSnapshot.arenaDefinition().id();
+    }
+
+    /**
+     * Retorna el contexto espacial activo de la batalla respaldado por la arena.
+     *
+     * @return BattleSpatialContext de la sesión
+     */
+    public BattleSpatialContext getSpatialContext() {
+        return spatialContext;
     }
 
     /**

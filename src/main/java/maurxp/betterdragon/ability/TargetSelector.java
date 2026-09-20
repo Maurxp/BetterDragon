@@ -31,21 +31,16 @@ import java.util.UUID;
  */
 public class TargetSelector {
 
-    public static final double DEFAULT_ARENA_RADIUS = 150.0;
     private final BattleSpatialContext spatialContext;
     private final Random random;
 
     public TargetSelector(BattleSpatialContext spatialContext, Random random) {
-        this.spatialContext = spatialContext != null ? spatialContext : new DefaultBattleSpatialContext();
+        this.spatialContext = Objects.requireNonNull(spatialContext, "BattleSpatialContext no puede ser nulo");
         this.random = Objects.requireNonNull(random, "Random no puede ser nulo");
     }
 
-    public TargetSelector(Random random) {
-        this(new DefaultBattleSpatialContext(), random);
-    }
-
-    public TargetSelector() {
-        this(new DefaultBattleSpatialContext(), new Random());
+    public TargetSelector(BattleSpatialContext spatialContext) {
+        this(spatialContext, new Random());
     }
 
     /**
@@ -71,7 +66,7 @@ public class TargetSelector {
         Objects.requireNonNull(world, "World no puede ser nulo");
 
         Location arenaCenter = spatialContext.getArenaCenter(world);
-        List<Player> arenaPlayers = getValidPlayersInArena(world, arenaCenter, DEFAULT_ARENA_RADIUS);
+        List<Player> arenaPlayers = getValidPlayersInArena(world);
 
         return switch (type) {
             case ALL_IN_ARENA -> List.copyOf(arenaPlayers);
@@ -142,22 +137,27 @@ public class TargetSelector {
     }
 
     /**
-     * Obtiene los jugadores válidos dentro del radio de la arena.
+     * Obtiene los jugadores válidos dentro de los límites espaciales reales de la arena.
+     * Evalúa a los jugadores del mundo contra el método {@link BattleSpatialContext#isInArena(Location)},
+     * garantizando que coincidan tanto el mundo como los límites volumétricos sin emplear radios ficticios.
+     *
+     * @param world mundo de la batalla
+     * @return lista inmutable de jugadores válidos dentro de la arena
      */
-    public List<Player> getValidPlayersInArena(World world, Location center, double radius) {
-        Location refCenter = center != null ? center : spatialContext.getArenaCenter(world);
-        double radiusSquared = radius * radius;
+    public List<Player> getValidPlayersInArena(World world) {
+        Objects.requireNonNull(world, "World no puede ser nulo");
+        if (spatialContext.getBounds() == null) {
+            return List.of();
+        }
         List<Player> result = new ArrayList<>();
-
         for (Player player : world.getPlayers()) {
-            if (isValidTarget(player)) {
-                if (player.getLocation().distanceSquared(refCenter) <= radiusSquared) {
-                    result.add(player);
-                }
+            if (isValidTarget(player) && spatialContext.isInArena(player.getLocation())) {
+                result.add(player);
             }
         }
-        return result;
+        return Collections.unmodifiableList(result);
     }
+
 
     /**
      * Comprueba si un jugador es un objetivo válido y activo.

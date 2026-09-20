@@ -7,6 +7,7 @@ import maurxp.betterdragon.ability.effect.ParticleEffect;
 import maurxp.betterdragon.ability.effect.SoundEffect;
 import maurxp.betterdragon.battle.BattleSession;
 import maurxp.betterdragon.phase.PhaseDefinition;
+import maurxp.betterdragon.arena.ArenaDefinition;
 import org.bukkit.Location;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Player;
@@ -62,8 +63,17 @@ public class AbilityEngine {
         }
     }
 
+    public AbilityEngine(Map<String, AbilityDefinition> abilityCatalog, BattleSpatialContext spatialContext, Logger logger) {
+        this(abilityCatalog,
+                new AbilityCooldownTracker(),
+                new TargetSelector(Objects.requireNonNull(spatialContext, "spatialContext no puede ser nulo")),
+                new LocationResolver(Objects.requireNonNull(spatialContext, "spatialContext no puede ser nulo")),
+                null,
+                logger);
+    }
+
     public AbilityEngine(Map<String, AbilityDefinition> abilityCatalog, Logger logger) {
-        this(abilityCatalog, new AbilityCooldownTracker(), new TargetSelector(), new LocationResolver(), null, logger);
+        this(abilityCatalog, new ArenaBattleSpatialContext(ArenaDefinition.defaults()), logger);
     }
 
     private void registerDefaultEffects() {

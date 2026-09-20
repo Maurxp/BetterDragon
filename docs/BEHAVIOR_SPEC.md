@@ -118,18 +118,18 @@ La batalla opera como una Máquina de Estados Finitos (FSM) confinada al hilo pr
   - Cada sesión de batalla mantiene su propio estado de cooldown sin singletons.
   - Al cambiar de fase, las recargas de la fase previa se descartan (`reset()`) para que las habilidades de la nueva fase estén disponibles de inmediato.
 - **Selectores de Objetivos (Entidades):**
-  - `ALL_IN_ARENA`: Todos los jugadores conectados en el mundo dentro del radio de la arena (150 bloques), con vida > 0 y en supervivencia o aventura.
-  - `RANDOM_PLAYER`: Un jugador válido seleccionado con RNG encapsulado.
-  - `RANDOM_SUBSET`: Hasta N jugadores sin duplicados (o todos si la cantidad disponible es menor a N).
-  - `NEAREST_PLAYER`: Jugador más cercano a la coordenada de origen previamente resuelta (`resolvedOrigin`, ej. `DRAGON_HEAD`) con desempate determinista por UUID.
+  - `ALL_IN_ARENA`: Jugadores en el mundo de la arena dentro del volumen tridimensional ortogonal real (`ArenaBounds`), evaluados mediante `spatialContext.isInArena(player.getLocation())` sin aproximaciones esféricas, radios inventados ni coordenadas mágicas.
+  - `RANDOM_PLAYER`: Un jugador aleatorio elegible.
+  - `RANDOM_SUBSET`: Subconjunto aleatorio de hasta N jugadores elegibles.
+  - `NEAREST_PLAYER`: Jugador elegible más cercano al origen resuelto (desempate determinista por UUID).
   - `DAMAGER`: Jugador con mayor daño acumulado (`TOP_DAMAGE`) consultado de `CombatRuntime`.
   - `TRIGGERING_PLAYER`: Jugador asociado al trigger (si existe).
 - **Orígenes de Efecto (0% NMS):**
   - `DRAGON_HEAD`: Proyección frontal de la cabeza del dragón vía Bukkit API pública.
   - `DRAGON_BODY`: Ubicación corporal de la entidad dragón.
   - `TARGET_FEET`: Coordenadas a los pies del objetivo primario (con fallback seguro al dragón).
-  - `PODIUM_CENTER`: Ubicación central del pedestal/portal de bedrock en el End (Y=65.0) provista por `BattleSpatialContext`.
-  - `ARENA_CENTER`: Centro geométrico aéreo de la arena de combate (Y=100.0) provisto por `BattleSpatialContext`.
+  - `PODIUM_CENTER`: Ubicación real del pedestal central de bedrock en el End provista por la `ArenaDefinition` congelada en `BattleSpatialContext`.
+  - `ARENA_CENTER`: Centro geométrico aéreo real de la arena provisto por la `ArenaDefinition` congelada en `BattleSpatialContext`.
   - `TRIGGER_LOCATION`: Coordenada del causante del trigger (con fallback seguro al dragón).
 - **Efectos Canónicos de Habilidades:**
   - `DAMAGE`: Inflige daño directo al jugador vía `target.damage(amount, dragon)`. Aislado al 100% de `CombatRuntime` (no alimenta daño de jugadores hacia dragón).
@@ -139,7 +139,34 @@ La batalla opera como una Máquina de Estados Finitos (FSM) confinada al hilo pr
 
 ---
 
-## 5. Recompensas, Claims y Persistencia
+## 5. Arenas, Geometría y Reglas de Combate (Fase 3.6 & 3.6-R1)
+
+- **Configuración y Gestión de Arenas (`arenas.yml`):**
+  - Cada arena posee un identificador estable (`id`), nombre del mundo asociado (`world`), centro aéreo (`center`), podio (`podium`), límites (`bounds`) y reglas (`rules`).
+  - La arena física resuelta para el mundo determina directamente el `arenaId` congelado en el `BattleConfigurationSnapshot` de la `BattleSession` (sincronización estricta de identidad).
+- **Separación Rigurosa entre Centro de Arena y Podio:**
+  - `ARENA_CENTER`: Punto tridimensional de combate en el aire donde operan las habilidades aéreas del dragón.
+  - `PODIUM_CENTER`: Coordenada terrestre exacta del portal/pedestal central de bedrock.
+  - Se prohíben las equivalencias o fallbacks mutuos entre ambos conceptos, y se eliminaron definitivamente los fallbacks duros como `(0, 100, 0)` o `(0, 65, 0)`.
+- **Límites de Arena (`ArenaBounds`) y Evaluación Multidimensional:**
+  - Representados mediante un volumen ortogonal alineado con los ejes (Axis-Aligned Bounding Box, AABB).
+  - Invariante geométrica estricta: $\min \le \max$ para $X, Y, Z$.
+  - Método determinista `contains(Location)` y `contains(double x, y, z)` utilizado activamente por `TargetSelector.ALL_IN_ARENA`.
+  - `isInArena(Location)` valida como una unidad indivisible `world + bounds`: si la entidad está en otro mundo diferente al configurado en la arena, se devuelve `false` incluso si las coordenadas numéricas coinciden.
+- **Reglas Canónicas de Arena (`ArenaRuleSet` y `ArenaRuleEvaluator`):**
+  - `waterAllowed` (Water Denial): Define si la colocación o presencia de agua está permitida en la arena durante el combate (`water_allowed: false` canónico). Se rechaza cualquier ambigüedad o contradicción con `water_denial`.
+  - `boundaryEnabled`: Define si la detección perimetral de la arena está activa.
+  - `antiTunnelEnabled`: Define si los controles de mitigación anti-túnel están habilitados.
+  - *Cero defaults arbitrarios:* La configuración en YAML debe ser explícita para todas las reglas; el loader rechaza omisiones sin asumir gameplay arbitrario.
+  - Las reglas quedan completamente aisladas de `AbilityEngine`, `CombatRuntime` y `RewardManager`.
+- **Aislamiento de Sesiones e Inmutabilidad ante Recargas:**
+  - Toda `BattleSession` congela la `ArenaDefinition` de su batalla al iniciar.
+  - La ejecución de `/bd reload` con un archivo `arenas.yml` inválido es rechazada atómicamente preservando la configuración anterior.
+  - Si una nueva configuración válida de arenas es cargada, las batallas en curso continúan inalteradas con su snapshot previo; únicamente las batallas nuevas usarán la nueva configuración.
+
+---
+
+## 6. Recompensas, Claims y Persistencia
 
 - **Recompensas:**
   - Recompensa exclusiva para el Slayer (`TOP_DAMAGE`).

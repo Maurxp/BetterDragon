@@ -27,11 +27,7 @@ public class LocationResolver {
     private final BattleSpatialContext spatialContext;
 
     public LocationResolver(BattleSpatialContext spatialContext) {
-        this.spatialContext = spatialContext != null ? spatialContext : new DefaultBattleSpatialContext();
-    }
-
-    public LocationResolver() {
-        this(new DefaultBattleSpatialContext());
+        this.spatialContext = Objects.requireNonNull(spatialContext, "BattleSpatialContext no puede ser nulo");
     }
 
     /**

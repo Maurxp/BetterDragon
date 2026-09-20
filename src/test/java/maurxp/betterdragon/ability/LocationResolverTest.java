@@ -1,5 +1,9 @@
 package maurxp.betterdragon.ability;
 
+import maurxp.betterdragon.arena.ArenaBounds;
+import maurxp.betterdragon.arena.ArenaDefinition;
+import maurxp.betterdragon.arena.ArenaRuleSet;
+import maurxp.betterdragon.arena.Vector3d;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.EnderDragon;
@@ -31,7 +35,9 @@ class LocationResolverTest {
 
     @BeforeEach
     void setUp() {
-        resolver = new LocationResolver();
+        ArenaDefinition defaultArena = ArenaDefinition.defaults();
+        BattleSpatialContext spatialContext = new ArenaBattleSpatialContext(defaultArena);
+        resolver = new LocationResolver(spatialContext);
 
         fakeWorld = (World) Proxy.newProxyInstance(
                 World.class.getClassLoader(),
@@ -126,7 +132,15 @@ class LocationResolverTest {
         // Proveedor personalizado de contexto espacial
         Location customPodium = new Location(fakeWorld, 10.0, 60.0, 10.0);
         Location customArena = new Location(fakeWorld, 50.0, 120.0, -30.0);
-        BattleSpatialContext customContext = new DefaultBattleSpatialContext(customPodium, customArena);
+        ArenaDefinition customArenaDef = new ArenaDefinition(
+                "custom",
+                "world_the_end",
+                new Vector3d(50.0, 120.0, -30.0),
+                new Vector3d(10.0, 60.0, 10.0),
+                new ArenaBounds(-100, 0, -100, 100, 256, 100),
+                ArenaRuleSet.defaults()
+        );
+        BattleSpatialContext customContext = new ArenaBattleSpatialContext(customArenaDef);
         LocationResolver customResolver = new LocationResolver(customContext);
 
         Location resolvedCustomPodium = customResolver.resolve(EffectOriginType.PODIUM_CENTER, fakeDragon, List.of(), Optional.empty());
@@ -134,6 +148,12 @@ class LocationResolverTest {
 
         assertEquals(customPodium, resolvedCustomPodium);
         assertEquals(customArena, resolvedCustomArena);
+    }
+
+    @Test
+    @DisplayName("Constructor de LocationResolver rechaza spatialContext nulo sin fallbacks mágicos")
+    void testNullSpatialContextThrowsNpe() {
+        assertThrows(NullPointerException.class, () -> new LocationResolver(null));
     }
 
     @Test

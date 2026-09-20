@@ -286,7 +286,7 @@ BattleSession
 ### 7.4 Contexto Inmutable, Selectores y Resolutores
 - **`AbilityExecutionContext` (Inmutable y Efímero):** Captura el estado congelado en el tick de ejecución (`battleId`, `worldName`, `dragon`, `trigger`, `resolvedTargets`, `resolvedOrigin`, `executionTick`, `ability`, `phase`). Se descarta al concluir el tick.
 - **`TargetSelector` (Entidades, no Bloques):**
-  - `ALL_IN_ARENA`: Jugadores en el mundo dentro del radio de la arena (150 bloques) en modo supervivencia o aventura.
+  - `ALL_IN_ARENA`: Jugadores en el mundo dentro del volumen ortogonal tridimensional real de la arena (`ArenaBounds`) y en el mismo mundo (`world + bounds`), en modo supervivencia o aventura. Sin radios ni esferas arbitrarias.
   - `RANDOM_PLAYER`: Jugador válido mediante RNG encapsulado y determinista.
   - `RANDOM_SUBSET`: Hasta N jugadores sin duplicados (o todos si hay menos de N).
   - `NEAREST_PLAYER`: Jugador más cercano al origen con desempate determinista por `UUID.toString()`.
@@ -300,3 +300,49 @@ BattleSession
 - **Seguridad de Ejecución y Validación de Triggers:**
   - El motor valida que el disparador invocado coincida estrictamente con `ability.trigger()` configurado, rechazando discrepancias de forma temprana.
   - La ejecución de efectos captura exclusivamente `Exception`, permitiendo que errores graves de la JVM (`Error`, `OutOfMemoryError`) se propaguen adecuadamente.
+
+---
+
+## 8. Arena & Rules (Phase 3.6)
+
+### 8.1 Modelo de Dominio de Arena (0% Bukkit en Modelos)
+El concepto de arena se materializa como un modelo de dominio fuertemente tipado e inmutable (`maurxp.betterdragon.arena`):
+- **`Vector3d`:** Record inmutable de coordenadas tridimensionales finitas $(x, y, z)$ con conversión segura `toLocation(World)`.
+- **`ArenaBounds`:** Bounding box axis-aligned (AABB) con invariante estricto $\min \le \max$ en cada eje. Provee consultas $O(1)$ deterministas: `contains(double x, y, z)` y `contains(Location)`.
+- **`ArenaRuleSet`:** Record inmutable que encapsula reglas específicas de arena:
+  - `waterAllowed`: Regla canónica de permiso o denegación de agua (`water_allowed: false`). Posee una única fuente de verdad, rechazando configuraciones conflictivas (`water_allowed` y `water_denial` duplicados o inconsistentes).
+  - `boundaryEnabled`: Regla de confinamiento perimetral explícitamente requerida.
+  - `antiTunnelEnabled`: Regla de mitigación anti-túnel explícitamente requerida.
+  - *Cero defaults de gameplay inventados:* `ArenaConfigurationLoader` no asume mecánicas arbitrarias ante campos omitidos; la configuración de reglas debe ser explícita.
+- **`ArenaDefinition`:** Definición canónica completa (`id`, `worldName`, `center`, `podium`, `bounds`, `rules`). Valida en su constructor compacto que los puntos de interés (`center` y `podium`) se ubiquen estrictamente dentro de los límites de la arena.
+- **`ArenaRuleEvaluator`:** Evaluador desacoplado y de alta cohesión que consulta la validez de posiciones y acciones frente a las reglas configuradas.
+
+### 8.2 Separación Estricta: Centro de Arena vs Podio
+Se eliminaron definitivamente todos los fallbacks ficticios (`DefaultBattleSpatialContext`, `(0, 100, 0)`, `(0, 65, 0)`):
+- **`ARENA_CENTER`:** Centro espacial y lógico aéreo del combate (ej. $Y=100.0$), utilizado por habilidades aéreas del dragón y proyectiles de área.
+- **`PODIUM_CENTER`:** Centro físico del pedestal de bedrock a nivel del suelo (ej. $Y=65.0$), utilizado para efectos terrestres o mecánicas de portal futuro.
+- **Independencia Absoluta:** Ambos puntos se configuran de forma desacoplada en `arenas.yml`; no existe alias ni delegación cruzada (`getArenaCenter()` $\neq$ `getPodiumCenter()`).
+
+### 8.3 Integración Espacial, Dimensiones y Selectores de Objetivos
+- **`ArenaBattleSpatialContext`:** Implementación inmutable de `BattleSpatialContext` asociada a la arena real congelada en la sesión. Requiere obligatoriamente un contexto espacial no nulo en `LocationResolver` y `TargetSelector`.
+- **Evaluación Espacial Multidimensional (`isInArena`):** `ArenaBattleSpatialContext.isInArena(Location)` evalúa como unidad indivisible `world + bounds`: si el mundo de la coordenada no coincide de forma estricta (insensible a mayúsculas) con `arena.worldName()`, retorna `false` de inmediato sin evaluar las coordenadas numéricas.
+- **`TargetSelector.ALL_IN_ARENA`:** Sustituye de forma radical cualquier radio esférico arbitrario (eliminando `DEFAULT_ARENA_RADIUS = 150.0`) por la comprobación exacta mediante `spatialContext.isInArena(player.getLocation())`, asegurando coherencia dimensional y geométrica con arenas pequeñas, grandes, asimétricas o multichunk.
+
+### 8.4 Sincronización de Arena ID, Loader y Snapshot Inmutable de Arenas
+```
+arenas.yml ──► [ArenaConfigurationLoader] ──► [ArenaConfigurationSnapshot] (Global Inmutable)
+                       │                                     │
+            (Validación Estricta)                            ▼
+                       │                        [BattleConfigurationSnapshot] (Congelado)
+                       ▼                                     │
+            ConfigValidationException                        ▼
+              (Fail-Safe / Rechazo)            [BattleSession] (Aislada de recargas)
+```
+- **Sincronización Estricta de Identidad:** `BattleManager.startBattle()` resuelve prioritariamente la `ArenaDefinition` física asociada al mundo (`resolveArenaForWorld`), y genera el `BattleConfigurationSnapshot` congelando directamente `arena.id()`. Esto erradica inconsistencias donde una arena secundaria (ej. `arena_pvp`) retenía un identificador `"default"`.
+- **`ArenaConfigurationLoader`:** Lee `arenas.yml`, valida sintaxis, números finitos, dimensiones coherentes e inclusiones geométricas, reportando errores detallados de forma acumulativa.
+- **Fail-Safe Atómico en Recarga (`/bd reload`):** Si `arenas.yml` presenta errores de validación, la recarga se aborta, la configuración de arenas previa se mantiene intacta en memoria y las sesiones de batalla activas conservan su `ArenaDefinition` inmutable original.
+- **Disponibilidad de Mundo en Runtime:** La arena distingue entre configuración válida en disco y disponibilidad del mundo en el servidor Paper. Si el mundo no está cargado o no existe, `BattleManager` rechaza iniciar la batalla tempranamente de forma segura.
+
+### 8.5 Confinamiento de Responsabilidades y Cero NMS
+- La capa de Arena no implementa recompensas, claims, portales, inventarios, destrucción global de bloques ni trampas de teletransporte.
+- 0% NMS: Todas las consultas espaciales operan sobre primitivos matemáticos puros y la API pública de Bukkit/Paper.

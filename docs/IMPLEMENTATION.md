@@ -24,7 +24,7 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 | **3.3-R1** | **Corrección Quirúrgica Lifecycle** | Eliminación de claves PDC innecesarias (`definition_id`, `schema_version`), resolución estricta de entidad en `DEFERRED_PENDING_CHUNK_LOAD` y restauración de estado lógico previo. | `DONE` |
 | **3.4** | **Combat Runtime** | Registro de participantes, tracking de daño en hilo principal, hitSequence monotónico, historicalName vs lastKnownName, TOP_DAMAGE con desempate determinista, evento BetterDragonDamageEvent, snapshots inmutables. | `DONE` |
 | **3.5** | **Motor de Habilidades y Fases** | Fases ordenadas, progresión monotónica por ratio de salud, AbilityEngine, TargetSelector, LocationResolver, efectos de combate (0% NMS), snapshots tipados, correcciones R1. | `COMPLETE` |
-| **3.6** | **Arena, Reglas y Límites** | Límites geométricos de arena, reglas anti-cheese y confinamiento espacial. | `TODO` |
+| **3.6** | **Arena, Reglas y Límites** | Límites geométricos de arena, reglas anti-cheese, separación podium/centro, snapshot inmutable y correcciones R1. | `COMPLETE` |
 | **3.7** | **Muerte, Victoria y BattleResult** | Transición terminal a COMPLETED, consolidación de BattleResult con CombatSnapshot final. | `TODO` |
 | **3.8** | **Recompensas y Claims** | Cálculo de botín, redistribución proporcional de no elegibles y buzón de claims en SQLite. | `TODO` |
 | **3.9** | **Persistencia SQLite** | Single-Writer Async Worker, migración de esquema y almacenamiento no bloqueante. | `TODO` |
@@ -83,3 +83,37 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 - **Validación Runtime (Paper 26.1.2-74):**
   - Suite de integración automatizada ejecutada con comando `bd-test-phases`.
   - 10/10 checks de runtime verificados en el servidor headless, concluyendo con apagado limpio exitoso (`exit code 0`).
+
+---
+
+## 5. Estado de la Fase 3.6 (Arena & Rules) — `COMPLETE` (Auditoría R1 Aplicada)
+
+- **Modelos de Dominio de Arena (`maurxp.betterdragon.arena`):**
+  - `Vector3d`: Coordenadas finitas $x, y, z$ puras independientes de Bukkit.
+  - `ArenaBounds`: Bounding box axis-aligned con invariante $\min \le \max$, consultas $O(1)$ `contains(x,y,z)` y `contains(Location)`.
+  - `ArenaRuleSet`: Reglas de arena tipadas e inmutables (`waterAllowed`, `boundaryEnabled`, `antiTunnelEnabled`).
+  - `ArenaDefinition`: Representación canónica de arena que valida que centro y podio se ubiquen dentro de los límites.
+  - `ArenaRuleEvaluator`: Evaluador desacoplado de reglas de arena.
+- **Contexto Espacial y Selectores (`maurxp.betterdragon.ability`):**
+  - `ArenaBattleSpatialContext`: Resuelve `ARENA_CENTER` y `PODIUM_CENTER` directamente desde la `ArenaDefinition` congelada, eliminando todo fallback hardcoded `(0, 100, 0)`.
+  - `TargetSelector.ALL_IN_ARENA`: Filtra jugadores con los límites reales `ArenaBounds` del contexto espacial mediante `spatialContext.isInArena(player.getLocation())`.
+- **Configuración y Snapshots (`maurxp.betterdragon.config`):**
+  - `arenas.yml`: Archivo de configuración oficial con arena `default` en `world_the_end`.
+  - `ArenaConfigurationLoader`: Carga tipada estricta y validación de límites, coordenadas y reglas.
+  - `ArenaConfigurationSnapshot`: Snapshot inmutable global de arenas.
+  - `BattleConfigurationSnapshot`: Congela la `ArenaDefinition` específica de la batalla; la sesión es inmune a recargas `/bd reload`.
+  - `ConfigurationService`: Recarga atómica fail-safe coordinada de `config.yml` y `arenas.yml`.
+- **Integración con Ciclo de Vida (`maurxp.betterdragon.battle`):**
+  - `BattleSession`: Almacena el `ArenaBattleSpatialContext` inmutable y expone `getArena()`, `getArenaId()`, `getSpatialContext()`.
+  - `BattleManager`: Valida disponibilidad de la arena y resolución de mundo antes de iniciar batallas.
+- **Correcciones Quirúrgicas de Auditoría R1 (Fase 3.6-R1):**
+  - *Eliminación de Fallbacks Espaciales Hardcoded:* Se eliminó definitivamente `DefaultBattleSpatialContext` y sus coordenadas provisionales `(0, 100, 0)` y `(0, 65, 0)`. Se eliminó `DEFAULT_ARENA_RADIUS = 150.0` de `TargetSelector`. `LocationResolver` y `TargetSelector` requieren un `BattleSpatialContext` no nulo.
+  - *Sincronización Estricta de Arena ID:* `BattleManager.startBattle()` resuelve prioritariamente la `ArenaDefinition` asociada al mundo y congela el snapshot directamente con `arena.id()`, garantizando consistencia absoluta entre `session.getArenaId()` y `session.getArena().id()`.
+  - *Fuente Canónica Única de Agua:* Representación canónica en `rules: water_allowed: false`. Se eliminó la duplicación y se detectan/rechazan contradicciones de configuración con `water_denial`.
+  - *Cero Defaults de Gameplay Inventados:* `ArenaConfigurationLoader` requiere explícitamente la sección `rules` y sus campos sin asumir valores de gameplay arbitrarios en código.
+  - *Evaluación Multidimensional en `isInArena`:* `ArenaBattleSpatialContext.isInArena(Location)` valida estrictamente la igualdad del nombre del mundo (`location.getWorld().getName() == arena.worldName()`) previo a la comprobación de límites ortogonales en `bounds`.
+- **Pruebas Unitarias:**
+  - 36 pruebas de Arena & Rules (178 pruebas unitarias/integración en total en el proyecto, 0 fallos, 0 errores).
+- **Validación Runtime (Paper 26.1.2-74):**
+  - Suite de integración de arenas ejecutada con comando `bd-test-arena`: 8/8 checks verificados con apagado limpio exitoso (`exit code 0`).
+  - Suite de regresión de fases y habilidades ejecutada con comando `bd-test-phases`: 10/10 checks verificados con apagado limpio exitoso (`exit code 0`).

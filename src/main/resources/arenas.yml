@@ -1,0 +1,47 @@
+# ==============================================================================
+# BETTERDRAGON — CONFIGURACIÓN DE ARENAS (FASE 3.6)
+# Versión: 0.1.0-SNAPSHOT
+# Autor: maurxp
+# ==============================================================================
+
+# Catálogo declarativo de arenas de combate configuradas
+arenas:
+  default:
+    # Nombre del mundo Bukkit correspondiente a la dimensión del End
+    world: "world_the_end"
+
+    # Centro espacial de combate aéreo de la arena
+    center:
+      x: 0.0
+      y: 100.0
+      z: 0.0
+
+    # Centro físico del podio / portal de salida a nivel del suelo
+    podium:
+      x: 0.0
+      y: 65.0
+      z: 0.0
+
+    # Límites espaciales (Axis-Aligned Bounding Box) de la arena
+    bounds:
+      min:
+        x: -150.0
+        y: 0.0
+        z: -150.0
+      max:
+        x: 150.0
+        y: 256.0
+        z: 150.0
+
+    # Reglas geométricas y ambientales de la arena
+    rules:
+      # Si el agua está permitida dentro de la arena (false = agua prohibida)
+      water_allowed: false
+
+      # Detección de perímetro/límites perimetrales
+      boundary:
+        enabled: true
+
+      # Regla de anti-túnel
+      anti_tunnel:
+        enabled: true

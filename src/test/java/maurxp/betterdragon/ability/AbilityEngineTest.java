@@ -90,8 +90,8 @@ class AbilityEngineTest {
         AbilityEngine engine = new AbilityEngine(
                 Map.of("test_sweep", sweep),
                 new AbilityCooldownTracker(),
-                new TargetSelector(),
-                new LocationResolver(),
+                new TargetSelector(session.getSpatialContext()),
+                new LocationResolver(session.getSpatialContext()),
                 Map.of(AbilityEffectType.KNOCKBACK, customEffect),
                 null
         );
@@ -143,8 +143,8 @@ class AbilityEngineTest {
         AbilityEngine engine = new AbilityEngine(
                 Map.of("failing", failingAbility),
                 new AbilityCooldownTracker(),
-                new TargetSelector(),
-                new LocationResolver(),
+                new TargetSelector(session.getSpatialContext()),
+                new LocationResolver(session.getSpatialContext()),
                 Map.of(AbilityEffectType.DAMAGE, failingEffect),
                 null
         );
@@ -173,8 +173,8 @@ class AbilityEngineTest {
         AbilityEngine engine = new AbilityEngine(
                 Map.of("p1", periodic, "e1", onEnter),
                 new AbilityCooldownTracker(),
-                new TargetSelector(),
-                new LocationResolver(),
+                new TargetSelector(session.getSpatialContext()),
+                new LocationResolver(session.getSpatialContext()),
                 Map.of(AbilityEffectType.SOUND, ctx -> executed.add(ctx.ability().id())),
                 null
         );
@@ -202,8 +202,8 @@ class AbilityEngineTest {
         AbilityEngine engine = new AbilityEngine(
                 Map.of("p1", periodic, "e1", onEnter),
                 new AbilityCooldownTracker(),
-                new TargetSelector(),
-                new LocationResolver(),
+                new TargetSelector(session.getSpatialContext()),
+                new LocationResolver(session.getSpatialContext()),
                 Map.of(AbilityEffectType.SOUND, ctx -> executed.add(ctx.ability().id())),
                 null
         );
@@ -224,16 +224,16 @@ class AbilityEngineTest {
         AbilityEngine engine1 = new AbilityEngine(
                 Map.of("sweep", sweep),
                 new AbilityCooldownTracker(),
-                new TargetSelector(),
-                new LocationResolver(),
+                new TargetSelector(session.getSpatialContext()),
+                new LocationResolver(session.getSpatialContext()),
                 Map.of(AbilityEffectType.KNOCKBACK, ctx -> {}),
                 null);
 
         AbilityEngine engine2 = new AbilityEngine(
                 Map.of("sweep", sweep),
                 new AbilityCooldownTracker(),
-                new TargetSelector(),
-                new LocationResolver(),
+                new TargetSelector(session.getSpatialContext()),
+                new LocationResolver(session.getSpatialContext()),
                 Map.of(AbilityEffectType.KNOCKBACK, ctx -> {}),
                 null);
 
@@ -259,8 +259,8 @@ class AbilityEngineTest {
         AbilityEngine engine = new AbilityEngine(
                 Map.of("periodic_only", periodicAbility),
                 new AbilityCooldownTracker(),
-                new TargetSelector(),
-                new LocationResolver(),
+                new TargetSelector(session.getSpatialContext()),
+                new LocationResolver(session.getSpatialContext()),
                 Map.of(AbilityEffectType.SOUND, ctx -> count.incrementAndGet()),
                 null);
 
@@ -283,8 +283,8 @@ class AbilityEngineTest {
         AbilityEngine engine = new AbilityEngine(
                 Map.of("fatal", errorAbility),
                 new AbilityCooldownTracker(),
-                new TargetSelector(),
-                new LocationResolver(),
+                new TargetSelector(session.getSpatialContext()),
+                new LocationResolver(session.getSpatialContext()),
                 Map.of(AbilityEffectType.SOUND, ctx -> {
                     throw new AssertionError("Simulated JVM assertion error");
                 }),
@@ -343,8 +343,8 @@ class AbilityEngineTest {
         AbilityEngine engine = new AbilityEngine(
                 Map.of("head_strike", headAbility),
                 new AbilityCooldownTracker(),
-                new TargetSelector(),
-                new LocationResolver(),
+                new TargetSelector(session.getSpatialContext()),
+                new LocationResolver(session.getSpatialContext()),
                 Map.of(AbilityEffectType.SOUND, ctx -> capturedTargets.addAll(ctx.resolvedTargets())),
                 null);
 

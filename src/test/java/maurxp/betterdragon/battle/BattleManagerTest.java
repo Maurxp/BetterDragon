@@ -76,7 +76,7 @@ class BattleManagerTest {
     @Test
     @DisplayName("startBattle completa flujo PREPARING -> ACTIVE y asocia DragonIdentity")
     void testStartBattleSuccessfulFlow() {
-        World endWorld = createFakeWorld("test_world_the_end", UUID.randomUUID(), World.Environment.THE_END);
+        World endWorld = createFakeWorld("world_the_end", UUID.randomUUID(), World.Environment.THE_END);
 
         UUID dragonUuid = UUID.randomUUID();
         DragonSpawner fakeSpawner = new DragonSpawner() {
@@ -100,7 +100,7 @@ class BattleManagerTest {
     @Test
     @DisplayName("Fallo durante el spawn no deja sesión activa huérfana en memoria")
     void testSpawnFailureCleansUpSession() {
-        World endWorld = createFakeWorld("test_world_the_end", UUID.randomUUID(), World.Environment.THE_END);
+        World endWorld = createFakeWorld("world_the_end", UUID.randomUUID(), World.Environment.THE_END);
 
         DragonSpawner failingSpawner = new DragonSpawner() {
             @Override
@@ -121,7 +121,7 @@ class BattleManagerTest {
     @Test
     @DisplayName("abortBattle cancela la sesión con motivo tipado y la remueve de memoria")
     void testAbortBattle() {
-        World endWorld = createFakeWorld("test_world_the_end", UUID.randomUUID(), World.Environment.THE_END);
+        World endWorld = createFakeWorld("world_the_end", UUID.randomUUID(), World.Environment.THE_END);
         DragonSpawner fakeSpawner = new DragonSpawner() {
             @Override
             public EnderDragon spawnDragon(World world, Location location, BattleId battleId, String definitionId) {
@@ -132,6 +132,7 @@ class BattleManagerTest {
         BattleManager manager = new BattleManager(sessionManager, configService, fakeSpawner, logger);
         BattleSession session = manager.startBattle(endWorld);
 
+
         assertTrue(manager.getActiveSession(session.getBattleId()).isPresent());
 
         manager.abortBattle(session.getBattleId(), BattleAbortReason.MANUAL_ABORT);
@@ -139,6 +140,26 @@ class BattleManagerTest {
         assertEquals(BattleState.ABORTED, session.getState());
         assertTrue(manager.getActiveSession(session.getBattleId()).isEmpty());
         assertFalse(sessionManager.hasActiveSession(endWorld.getName()));
+    }
+
+    @Test
+    @DisplayName("startBattle sincroniza consistentemente arenaId y ArenaDefinition en la BattleSession")
+    void testStartBattleSynchronizesArenaIdAndDefinition() {
+        World endWorld = createFakeWorld("world_the_end", UUID.randomUUID(), World.Environment.THE_END);
+
+        DragonSpawner fakeSpawner = new DragonSpawner() {
+            @Override
+            public EnderDragon spawnDragon(World world, Location location, BattleId battleId, String definitionId) {
+                return createFakeDragon(UUID.randomUUID(), battleId, definitionId);
+            }
+        };
+
+        BattleManager manager = new BattleManager(sessionManager, configService, fakeSpawner, logger);
+        BattleSession session = manager.startBattle(endWorld);
+
+        assertEquals("default", session.getArenaId());
+        assertEquals("default", session.getArena().id());
+        assertEquals(session.getArenaId(), session.getConfigSnapshot().arenaDefinition().id());
     }
 
     // --- Helpers de prueba ---

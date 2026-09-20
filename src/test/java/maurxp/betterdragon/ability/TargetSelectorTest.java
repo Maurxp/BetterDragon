@@ -37,7 +37,6 @@ class TargetSelectorTest {
 
     @BeforeEach
     void setUp() {
-        selector = new TargetSelector(new Random(42L)); // Determinista
         worldPlayers = new ArrayList<>();
 
         fakeWorld = (World) Proxy.newProxyInstance(
@@ -55,6 +54,7 @@ class TargetSelectorTest {
         center = new Location(fakeWorld, 0, 65, 0);
         session = BattleSession.create(BattleId.random(), "world_the_end", UUID.randomUUID());
         combatRuntime = session.getCombatRuntime();
+        selector = new TargetSelector(session.getSpatialContext(), new Random(42L));
     }
 
     private Player createFakePlayer(UUID uuid, Location loc, GameMode gm, boolean alive, boolean online) {
@@ -206,5 +206,59 @@ class TargetSelectorTest {
         // Ausente
         List<Player> emptyTargets = selector.resolveTargets(TargetSelectorType.TRIGGERING_PLAYER, dummy, fakeWorld, center, combatRuntime, Optional.empty());
         assertTrue(emptyTargets.isEmpty());
+    }
+
+    @Test
+    @DisplayName("TargetSelector rechaza spatialContext nulo sin fallbacks mágicos")
+    void testNullSpatialContextThrowsNpe() {
+        assertThrows(NullPointerException.class, () -> new TargetSelector(null, new Random()));
+        assertThrows(NullPointerException.class, () -> new TargetSelector(null));
+    }
+
+    @Test
+    @DisplayName("ALL_IN_ARENA utiliza exclusivamente los bounds reales y excluye jugadores en otros mundos")
+    void testAllInArenaStrictlyUsesRealBoundsAndExcludesOtherWorld() {
+        // Creamos una arena pequeña con bounds [-50, 50]
+        maurxp.betterdragon.arena.ArenaDefinition smallArena = new maurxp.betterdragon.arena.ArenaDefinition(
+                "small",
+                "world_the_end",
+                new maurxp.betterdragon.arena.Vector3d(0, 100, 0),
+                new maurxp.betterdragon.arena.Vector3d(0, 65, 0),
+                new maurxp.betterdragon.arena.ArenaBounds(-50, 0, -50, 50, 256, 50),
+                maurxp.betterdragon.arena.ArenaRuleSet.defaults()
+        );
+        ArenaBattleSpatialContext smallContext = new ArenaBattleSpatialContext(smallArena);
+        TargetSelector strictSelector = new TargetSelector(smallContext, new Random(1L));
+
+        // Jugador dentro de bounds (-50 a 50)
+        Player inside = createFakePlayer(UUID.randomUUID(), new Location(fakeWorld, 40, 65, 40), GameMode.SURVIVAL, true, true);
+
+        // Jugador fuera de bounds (a 70 bloques, pero < 150 bloques del centro, comprobando que NO hay fallback a 150)
+        Player outsideBounds = createFakePlayer(UUID.randomUUID(), new Location(fakeWorld, 70, 65, 0), GameMode.SURVIVAL, true, true);
+
+        // Jugador con coordenadas dentro de bounds pero en otro mundo
+        World otherWorld = (World) Proxy.newProxyInstance(
+                World.class.getClassLoader(),
+                new Class<?>[]{World.class},
+                (proxy, method, args) -> {
+                    if (method.getName().equals("getName")) return "world_nether";
+                    if (method.getName().equals("equals")) return proxy == args[0];
+                    return null;
+                }
+        );
+        Player otherWorldPlayer = createFakePlayer(UUID.randomUUID(), new Location(otherWorld, 10, 65, 10), GameMode.SURVIVAL, true, true);
+
+        worldPlayers.clear();
+        worldPlayers.addAll(List.of(inside, outsideBounds, otherWorldPlayer));
+
+        AbilityDefinition dummy = new AbilityDefinition("d", AbilityTrigger.PERIODIC, 0,
+                TargetSelectorType.ALL_IN_ARENA, EffectOriginType.DRAGON_BODY, AbilityEffectType.DAMAGE);
+
+        List<Player> targets = strictSelector.resolveTargets(TargetSelectorType.ALL_IN_ARENA, dummy, fakeWorld, center, combatRuntime, Optional.empty());
+
+        assertEquals(1, targets.size(), "Solo el jugador dentro del AABB real en el mundo correcto debe ser seleccionado");
+        assertTrue(targets.contains(inside));
+        assertFalse(targets.contains(outsideBounds), "Jugador a 70 bloques debe ser excluido porque los bounds son [-50, 50]");
+        assertFalse(targets.contains(otherWorldPlayer), "Jugador en otro mundo debe ser excluido");
     }
 }
