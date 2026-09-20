@@ -25,8 +25,8 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 | **3.4** | **Combat Runtime** | Registro de participantes, tracking de daño en hilo principal, hitSequence monotónico, historicalName vs lastKnownName, TOP_DAMAGE con desempate determinista, evento BetterDragonDamageEvent, snapshots inmutables. | `DONE` |
 | **3.5** | **Motor de Habilidades y Fases** | Fases ordenadas, progresión monotónica por ratio de salud, AbilityEngine, TargetSelector, LocationResolver, efectos de combate (0% NMS), snapshots tipados, correcciones R1. | `COMPLETE` |
 | **3.6** | **Arena, Reglas y Límites** | Límites geométricos de arena, reglas anti-cheese, separación podium/centro, snapshot inmutable y correcciones R1. | `COMPLETE` |
-| **3.7** | **Muerte, Victoria y BattleResult** | Transición terminal a COMPLETED, consolidación de BattleResult con CombatSnapshot final, Slayer TOP_DAMAGE, evento de victoria. | `COMPLETE` |
-| **3.8** | **Recompensas y Claims** | Cálculo de botín, redistribución proporcional de no elegibles y buzón de claims en SQLite. | `TODO` |
+| **3.7–3.7-R1** | **Muerte, Victoria y BattleResult (y Cierre R1)** | Transición terminal a COMPLETED, consolidación de BattleResult con CombatSnapshot final, Slayer TOP_DAMAGE (2 criterios), supresión soberana de XP/drops, evento de victoria encapsulado. | `COMPLETE` |
+| **3.8** | **Recompensas y Claims** | Cálculo de botín, redistribución proporcional de no elegibles y buzón de claims en SQLite. | `TODO (Siguiente Fase)` |
 | **3.9** | **Persistencia SQLite** | Single-Writer Async Worker, migración de esquema y almacenamiento no bloqueante. | `TODO` |
 | **3.10**| **Sistema de Leaderboard** | Agregación de estadísticas históricas (Top Slayers, Mayor Daño, Total Batallas) con caché en memoria. | `TODO` |
 | **3.11**| **Framework de Comandos & GUI** | Implementación de `/betterdragon` y `/bd` (`spawn`, `cancel`, `status`, `reload`, `top`, `claim`). | `TODO` |
@@ -155,3 +155,14 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
   - Suites de regresión completas ejecutadas exitosamente:
     - `run_phases_suite.py`: 10/10 checks pasados (exit code 0).
     - `run_arena_suite.py`: 8/8 checks pasados (exit code 0).
+
+---
+
+## 7. Próxima Fase: Fase 3.8 — Recompensas y Claims `[PENDIENTE]`
+
+- **Objetivo Arquitectónico:** Diseñar e implementar el sistema de recompensas de BetterDragon alimentado por el `BattleResult` inmutable emitido al completarse la victoria (Fase 3.7-R1).
+- **Alcance Planificado:**
+  - Determinación de botín exclusivo para el Slayer (`TOP_DAMAGE`).
+  - Distribución escalonada/proporcional de recompensas para participantes elegibles según contribución de daño.
+  - Mitigación para inventarios llenos o participantes desconectados vía buzón de claims (respaldado por SQLite en 3.9).
+- **Cero Implementación Anticipada:** Todo el motor de recompensas permanece en estado de diseño y se implementará formalmente durante la Fase 3.8. Ninguna lógica de recompensas está activa en el runtime actual.

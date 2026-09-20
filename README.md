@@ -17,9 +17,11 @@
 - **Fase 3.1:** Modelos de Dominio e Invariantes de Estado `[DONE]`
 - **Fase 3.2:** Sistema de Configuración y Snapshots Inmutables `[DONE]`
 - **Fase 3.3–3.3-R1:** Dragon Lifecycle, Firma PDC y Recuperación de Chunks `[DONE]`
-- **Fase 3.5:** Combat Phases & Abilities (Fases Ordenadas, Monotonicidad, AbilityEngine, R1) `[COMPLETE]`
-- **Fase 3.6:** Arena, Reglas y Límites (Geometría AABB, arenas.yml, Snapshot, 0% NMS) `[COMPLETE]`
-- **Próxima Subfase:** Fase 3.7 — Muerte, Victoria y BattleResult `[TODO]`
+- **Fase 3.4:** Combat Runtime (HitSequence Monotónico, Damage Tracking, TOP_DAMAGE) `[DONE]`
+- **Fase 3.5–3.5-R1:** Combat Phases & Abilities (Fases Ordenadas, Monotonicidad, AbilityEngine) `[DONE]`
+- **Fase 3.6–3.6-R1:** Arena, Reglas y Límites (Geometría AABB, arenas.yml, Snapshot Inmutable, 0% NMS) `[DONE]`
+- **Fase 3.7–3.7-R1:** Muerte, Victoria y BattleResult (Idempotencia, Supresión XP/Drops, Encapsulación Evento) `[DONE]`
+- **Próxima Fase:** Fase 3.8 — Recompensas y Claims `[TODO]`
 
 ---
 

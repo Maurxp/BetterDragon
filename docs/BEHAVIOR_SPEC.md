@@ -164,39 +164,41 @@ La batalla opera como una Máquina de Estados Finitos (FSM) confinada al hilo pr
   - La ejecución de `/bd reload` con un archivo `arenas.yml` inválido es rechazada atómicamente preservando la configuración anterior.
   - Si una nueva configuración válida de arenas es cargada, las batallas en curso continúan inalteradas con su snapshot previo; únicamente las batallas nuevas usarán la nueva configuración.
 
----
-
-## 6. Recompensas, Claims y Persistencia
-
-- **Recompensas:**
-  - Recompensa exclusiva para el Slayer (`TOP_DAMAGE`).
-  - Botín escalonado por porcentaje de contribución.
-- **Buzón de Claims:** Si el inventario de un participante está lleno o el jugador está desconectado, los ítems se guardan en SQLite y se retiran con `/bd claim`. `[PENDIENTE]`
-- **Persistencia SQLite:** Almacenamiento no bloqueante mediante un worker asíncrono de escritor único (*Single-Writer Async Worker*). `[CONGELADO]`
-- **Recuperación tras Reinicio:** Dragones con PDC detectados durante el arranque sin batalla activa en memoria son removidos de forma limpia para evitar entidades huérfanas. `[CONGELADO]`
-
----
-
-## 7. Muerte y Victoria (Fase 3.7 & 3.7-R1: Death / Victory) `[CONGELADO]`
+## 6. Muerte y Victoria (Fase 3.7 & 3.7-R1: Death / Victory) `[COMPLETO / CONSOLIDADO]`
 
 - **Disparador Exclusivo de Victoria:**
   - La victoria de una batalla BetterDragon requiere imperativamente el evento de Bukkit `EntityDeathEvent` sobre el `EnderDragon` administrado (`betterdragon:managed=true`, `betterdragon:battle_id`).
   - La descarga de chunks, desaparición o reinicio **nunca** constituyen victoria (`ABORTED_ENTITY_MISSING`).
-  - Independencia de `DragonBattle`: ningún método, evento o flag de `DragonBattle` vanilla (`hasBeenPreviouslyKilled()`, `dragonKilled`) interviene en la victoria.
+  - **Independencia Absoluta de DragonBattle:** ningún método, evento o flag de `DragonBattle` vanilla (`hasBeenPreviouslyKilled()`, `dragonKilled`, `getEnderDragon()`) interviene como fuente de verdad en el ciclo de vida o victoria de BetterDragon.
 - **Transición y Finalización:**
   - Al recibir `EntityDeathEvent` verificado por PDC:
     1. Se suprimen la experiencia vanilla (0 XP) y drops del dragón administrado (`getDrops().clear()`, `setDroppedExp(0)`).
     2. La sesión pasa a `DYING`.
     3. Se extrae `CombatSnapshot` inmutable del `CombatRuntime`.
-    4. Se determina el Slayer por `TOP_DAMAGE` mediante dos únicos criterios: mayor daño total (`totalDamage DESC`) y menor `firstHitSequence ASC` en caso de empate (sin desempate por UUID).
+    4. Se determina el Slayer por `TOP_DAMAGE` mediante dos únicos criterios deterministas: mayor daño total (`totalDamage DESC`) y menor `firstHitSequence ASC` en caso de empate (sin desempate por UUID ni tercer criterio).
     5. La sesión pasa a `COMPLETED`.
     6. Se construye y cachea el `BattleResult` inmutable.
-    7. Se despacha el evento público `BetterDragonVictoryEvent` (exponiendo `BattleResult`, `BattleId` y `worldName`, sin exponer `BattleSession`).
+    7. Se despacha el evento público `BetterDragonVictoryEvent` (exponiendo datos inmutables de dominio: `BattleResult`, `BattleId` y `worldName`, sin exponer `BattleSession` ni runtime mutable interno).
 - **Comportamiento Vanilla Preservado:**
   - Dragones no administrados (vanilla) que mueran en el End no sufren supresión de XP ni de drops, y no disparan eventos ni transiciones de BetterDragon.
-- **Dragon Egg y Primera Victoria:**
-  - El ciclo de vida del huevo y el concepto de primera victoria son independientes de `DragonBattle`. En esta fase no se spawnea ni manipula ningún huevo, quedando reservado a la arquitectura de BetterDragon.
+- **Dragon Egg y Primera Victoria Independientes:**
+  - El huevo de dragón y el concepto de primera victoria no dependen del estado vanilla `DragonBattle`.
+  - En la Fase 3.7-R1 **NO** se genera, manipula ni elimina ningún huevo de dragón en el mundo. El ciclo de vida del huevo y el concepto de primera victoria quedan explícitamente reservados para el sistema propio de BetterDragon en fases posteriores.
 - **Idempotencia Estricta:**
-  - Cualquier llamada posterior con el mismo dragón o sesión ya `COMPLETED` es un no-op seguro que retorna el mismo `BattleResult` sin disparar eventos duplicados.
+  - Cualquier llamada posterior con el mismo dragón o sesión ya `COMPLETED` es un no-op seguro que retorna el mismo `BattleResult` inmutable sin disparar eventos duplicados.
 - **Participantes Offline:**
   - Jugadores desconectados u offline conservan su candidatura a Slayer y sus nombres históricos sin requerir conexión a Bukkit.
+
+---
+
+## 7. Recompensas, Claims y Persistencia (Fases Futuras: 3.8 y 3.9) `[PENDIENTE]`
+
+- **Recompensas Propias de BetterDragon (Fase 3.8 - Siguiente Fase):**
+  - Las recompensas de BetterDragon **NO están implementadas todavía** en el runtime.
+  - Diseño conceptual: recompensa exclusiva para el Slayer (`TOP_DAMAGE`) y botín escalonado/proporcional por porcentaje de contribución, a implementarse formalmente en la Fase 3.8 consumiendo `BattleResult`.
+- **Buzón de Claims (Fase 3.8):**
+  - Si el inventario de un participante está lleno o el jugador está desconectado, los ítems se guardan en el buzón y se retiran con `/bd claim`. `[PENDIENTE FASE 3.8]`
+- **Persistencia SQLite (Fase 3.9):**
+  - Almacenamiento no bloqueante mediante un worker asíncrono de escritor único (*Single-Writer Async Worker*). `[PENDIENTE FASE 3.9]`
+- **Recuperación tras Reinicio:**
+  - Dragones con PDC detectados durante el arranque sin batalla activa en memoria son removidos de forma limpia para evitar entidades huérfanas. `[CONSOLIDADO EN 3.3-R1]`

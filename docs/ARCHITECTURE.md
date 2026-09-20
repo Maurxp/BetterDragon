@@ -293,7 +293,7 @@ BattleSession
   - `TRIGGERING_PLAYER`: Jugador causante del evento disparador.
 - **`LocationResolver` y `BattleSpatialContext` (0% NMS):**
   Resuelve coordenadas espaciales precisas para `DRAGON_HEAD`, `DRAGON_BODY`, `TARGET_FEET`, `PODIUM_CENTER`, `ARENA_CENTER` y `TRIGGER_LOCATION` con fallbacks seguros que garantizan cero `NullPointerException`.
-  - `BattleSpatialContext`: Abstracción que separa semánticamente la ubicación del podium de salida (`PODIUM_CENTER`, nivel pedestal de bedrock) del centro de la arena de combate (`ARENA_CENTER`, altitud de combate), extensible para la Fase 3.6.
+  - `BattleSpatialContext`: Abstracción que separa semánticamente la ubicación del podium de salida (`PODIUM_CENTER`, nivel pedestal de bedrock) del centro de la arena de combate (`ARENA_CENTER`, altitud de combate), formalizado en la Fase 3.6 y 3.6-R1.
 - **Orden de Resolución Coherente (Origin -> Target):**
   El origen se resuelve previo a la selección de objetivos (salvo `TARGET_FEET`), suministrando una referencia espacial exacta para `NEAREST_PLAYER` (ej. calculando distancia contra la cabeza del dragón para `DRAGON_HEAD`).
 - **Seguridad de Ejecución y Validación de Triggers:**
@@ -403,5 +403,6 @@ arenas.yml ──► [ArenaConfigurationLoader] ──► [ArenaConfigurationSna
 - **Encapsulación Estricta de Runtime:** `BetterDragonVictoryEvent` NO expone `BattleSession` ni ningún runtime mutable interno (`CombatRuntime`, `PhaseRuntime`, `AbilityEngine`). Los consumidores externos acceden a los datos de la batalla exclusivamente a través de `BattleResult`.
 - Desacoplado mediante la interfaz funcional `VictoryEventDispatcher` para habilitar pruebas unitarias puras sin necesidad de un servidor Bukkit mockeado.
 
-### 9.7 Límites Estrictos y Futuras Fases
-- En esta fase **NO** se implementan recompensas, entrega de ítems, claims, base de datos SQLite, leaderboard, portal central, generación de Dragon Egg ni comandos de administración.
+### 9.7 Límites Estrictos y Transición a Fase 3.8
+- En la Fase 3.7-R1 **NO** se implementan recompensas, entrega de ítems, claims, base de datos SQLite, leaderboard, portal central, generación de Dragon Egg ni comandos de administración.
+- **Transición a la Fase 3.8 (Rewards):** Habiéndose completado y validado el ciclo terminal de defunción y victoria (Fase 3.7 y 3.7-R1), la siguiente etapa de desarrollo es la **Fase 3.8 — Recompensas y Claims**, la cual consumirá el `BattleResult` inmutable emitido en la victoria.
