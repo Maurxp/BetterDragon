@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.io.Reader;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -333,14 +334,248 @@ public final class ConfigurationLoader {
             dragonDefinition = DragonDefinition.defaults();
         }
 
-        if (dragonDefinition == null && errors.isEmpty()) {
-            dragonDefinition = DragonDefinition.defaults();
+        // 6. rewards
+        RewardConfigurationSnapshot rewardConfig = RewardConfigurationSnapshot.defaults();
+        if (config.contains("rewards") && config.get("rewards") != null) {
+            ConfigurationSection rewardsSec = config.getConfigurationSection("rewards");
+            if (rewardsSec == null) {
+                errors.add("La sección 'rewards' debe ser un mapa de configuración.");
+            } else {
+                boolean rewardsEnabled = RewardConfigurationSnapshot.DEFAULT_ENABLED;
+                if (rewardsSec.contains("enabled")) {
+                    Object rawEnabled = rewardsSec.get("enabled");
+                    if (rawEnabled instanceof Boolean b) {
+                        rewardsEnabled = b;
+                    } else {
+                        errors.add("rewards.enabled debe ser un booleano (true o false). Se encontró: '" + rawEnabled + "'");
+                    }
+                }
+
+                double minParticipation = RewardConfigurationSnapshot.DEFAULT_MIN_PARTICIPATION_PERCENT;
+                if (rewardsSec.contains("min_participation_percent")) {
+                    Object rawMin = rewardsSec.get("min_participation_percent");
+                    if (rawMin instanceof Number n) {
+                        double val = n.doubleValue();
+                        if (Double.isNaN(val) || Double.isInfinite(val) || val < 0.0 || val > 100.0) {
+                            errors.add("rewards.min_participation_percent debe estar entre 0.0 y 100.0. Se encontró: " + val);
+                        } else {
+                            minParticipation = val;
+                        }
+                    } else {
+                        errors.add("rewards.min_participation_percent debe ser numérico. Se encontró: '" + rawMin + "'");
+                    }
+                }
+
+                Set<String> seenRewardIds = new HashSet<>();
+                List<RewardItemDefinition> poolItems = new ArrayList<>();
+                List<?> rawList = null;
+                String listPath = null;
+
+                if (rewardsSec.contains("participation_pool.items")) {
+                    rawList = rewardsSec.getList("participation_pool.items");
+                    listPath = "rewards.participation_pool.items";
+                } else if (rewardsSec.contains("participant_rewards")) {
+                    rawList = rewardsSec.getList("participant_rewards");
+                    listPath = "rewards.participant_rewards";
+                }
+
+                if (rawList != null) {
+                    int idx = 0;
+                    for (Object elem : rawList) {
+                        idx++;
+                        if (elem instanceof Map<?, ?> itemMap) {
+                            validateRewardItem(itemMap, listPath + "[" + idx + "]", poolItems, seenRewardIds, errors);
+                        } else {
+                            errors.add(listPath + "[" + idx + "] debe ser un mapa con 'id', 'material' y 'amount'.");
+                        }
+                    }
+                } else if (rewardsSec.contains("participation_pool")) {
+                    errors.add("La sección 'rewards.participation_pool' debe contener la lista 'items'.");
+                } else if (rewardsSec.contains("participant_rewards")) {
+                    errors.add("La sección 'rewards.participant_rewards' debe ser una lista de ítems.");
+                } else {
+                    poolItems = RewardConfigurationSnapshot.defaults().participationPool();
+                }
+
+                SlayerRewardDefinition slayerDef = SlayerRewardDefinition.defaults();
+                if (rewardsSec.contains("slayer_reward")) {
+                    ConfigurationSection slayerSec = rewardsSec.getConfigurationSection("slayer_reward");
+                    if (slayerSec == null) {
+                        errors.add("La sección 'rewards.slayer_reward' debe ser un mapa de configuración.");
+                    } else {
+                        boolean slayerEnabled = false;
+                        if (slayerSec.contains("enabled")) {
+                            Object rawSE = slayerSec.get("enabled");
+                            if (rawSE instanceof Boolean b) {
+                                slayerEnabled = b;
+                            } else {
+                                errors.add("rewards.slayer_reward.enabled debe ser un booleano. Se encontró: '" + rawSE + "'");
+                            }
+                        }
+
+                        boolean requiresEligibility = true;
+                        if (slayerSec.contains("requires_eligibility")) {
+                            Object rawRE = slayerSec.get("requires_eligibility");
+                            if (rawRE instanceof Boolean b) {
+                                requiresEligibility = b;
+                            } else {
+                                errors.add("rewards.slayer_reward.requires_eligibility debe ser un booleano. Se encontró: '" + rawRE + "'");
+                            }
+                        }
+
+                        List<RewardItemDefinition> slayerItems = new ArrayList<>();
+                        if (slayerSec.contains("items")) {
+                            List<?> rawSlayerList = slayerSec.getList("items");
+                            if (rawSlayerList != null) {
+                                int sIdx = 0;
+                                for (Object sElem : rawSlayerList) {
+                                    sIdx++;
+                                    if (sElem instanceof Map<?, ?> sMap) {
+                                        validateRewardItem(sMap, "rewards.slayer_reward.items[" + sIdx + "]", slayerItems, seenRewardIds, errors);
+                                    } else {
+                                        errors.add("rewards.slayer_reward.items[" + sIdx + "] debe ser un mapa con 'id', 'material' y 'amount'.");
+                                    }
+                                }
+                            } else {
+                                errors.add("rewards.slayer_reward.items debe ser una lista de ítems.");
+                            }
+                        } else {
+                            slayerItems = SlayerRewardDefinition.defaults().items();
+                        }
+
+                        slayerDef = new SlayerRewardDefinition(slayerEnabled, requiresEligibility, slayerItems);
+                    }
+                }
+
+                if (errors.isEmpty()) {
+                    rewardConfig = new RewardConfigurationSnapshot(rewardsEnabled, minParticipation, poolItems, slayerDef);
+                }
+            }
         }
 
         if (!errors.isEmpty()) {
             throw new ConfigValidationException("Errores de validación en la configuración de BetterDragon", errors);
         }
 
-        return new BetterDragonConfig(portalEnabled, loggingLevel, debugLogging, dragonDefinition);
+        return new BetterDragonConfig(portalEnabled, loggingLevel, debugLogging, dragonDefinition, rewardConfig);
+    }
+
+    private static void validateRewardItem(
+            Map<?, ?> itemMap,
+            String path,
+            List<RewardItemDefinition> targetList,
+            Set<String> seenRewardIds,
+            List<String> errors
+    ) {
+        boolean valid = true;
+
+        // 1. Identificador de recompensa (id)
+        Object rawId = itemMap.get("id");
+        String id = null;
+        if (rawId instanceof String strId && !strId.isBlank()) {
+            id = strId.trim();
+            if (!id.matches("^[a-zA-Z0-9_-]+$")) {
+                errors.add(path + ": 'id' inválido '" + strId + "'. Solo puede contener letras, números, guiones y guiones bajos (sin espacios ni dos puntos).");
+                valid = false;
+            } else if (!seenRewardIds.add(id.toLowerCase())) {
+                errors.add(path + ": 'id' de recompensa duplicado '" + id + "'. Cada definición de recompensa debe tener un id único.");
+                valid = false;
+            }
+        } else {
+            errors.add(path + ": falta el campo obligatorio 'id' (identificador de recompensa no vacío).");
+            valid = false;
+        }
+
+        // 2. Material de Minecraft
+        Object rawMaterial = itemMap.get("material");
+        String material = null;
+        if (rawMaterial instanceof String strMat && !strMat.isBlank()) {
+            material = strMat.toUpperCase().trim();
+            org.bukkit.Material mat = org.bukkit.Material.matchMaterial(material);
+            if (mat == null) {
+                errors.add(path + ": material '" + strMat + "' no es un Material de Minecraft válido.");
+                valid = false;
+            } else if (mat == org.bukkit.Material.AIR || mat == org.bukkit.Material.CAVE_AIR || mat == org.bukkit.Material.VOID_AIR) {
+                errors.add(path + ": material '" + strMat + "' no puede ser AIR.");
+                valid = false;
+            } else {
+                material = mat.name();
+            }
+        } else {
+            errors.add(path + ": falta el campo obligatorio 'material' (texto).");
+            valid = false;
+        }
+
+        // 3. Cantidad entera positiva
+        int amount = 1;
+        if (itemMap.containsKey("amount")) {
+            Object rawAmount = itemMap.get("amount");
+            Integer parsedAmount = parseExactPositiveAmount(rawAmount);
+            if (parsedAmount != null) {
+                amount = parsedAmount;
+            } else {
+                String rewardDesc = (id != null && !id.isBlank()) ? "recompensa '" + id + "'" : path;
+                errors.add(path + ": 'amount' debe ser un entero positivo mayor a 0 para " + rewardDesc + ". Se encontró: '" + rawAmount + "'");
+                valid = false;
+            }
+        }
+
+        if (valid && id != null && material != null) {
+            targetList.add(new RewardItemDefinition(id, material, amount));
+        }
+    }
+
+    static Integer parseExactPositiveAmount(Object rawAmount) {
+        if (rawAmount == null) {
+            return null;
+        }
+        if (rawAmount instanceof Integer i) {
+            return i > 0 ? i : null;
+        }
+        if (rawAmount instanceof Long l) {
+            if (l <= 0 || l > Integer.MAX_VALUE) {
+                return null;
+            }
+            return l.intValue();
+        }
+        if (rawAmount instanceof Short s) {
+            return s > 0 ? (int) s : null;
+        }
+        if (rawAmount instanceof Byte b) {
+            return b > 0 ? (int) b : null;
+        }
+        if (rawAmount instanceof Double d) {
+            if (d.isNaN() || d.isInfinite() || d <= 0.0 || d > Integer.MAX_VALUE) {
+                return null;
+            }
+            if (Math.floor(d) != d) {
+                return null;
+            }
+            return d.intValue();
+        }
+        if (rawAmount instanceof Float f) {
+            if (f.isNaN() || f.isInfinite() || f <= 0.0f || f > Integer.MAX_VALUE) {
+                return null;
+            }
+            if (Math.floor(f) != f) {
+                return null;
+            }
+            return f.intValue();
+        }
+        if (rawAmount instanceof Number n) {
+            double d = n.doubleValue();
+            if (Double.isNaN(d) || Double.isInfinite(d) || d <= 0.0 || d > Integer.MAX_VALUE) {
+                return null;
+            }
+            if (Math.floor(d) != d) {
+                return null;
+            }
+            long l = n.longValue();
+            if (l <= 0 || l > Integer.MAX_VALUE) {
+                return null;
+            }
+            return (int) l;
+        }
+        return null;
     }
 }

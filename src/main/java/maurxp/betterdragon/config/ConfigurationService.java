@@ -213,7 +213,8 @@ public class ConfigurationService {
                 activeConfig.portalEnabled(),
                 activeConfig.debugLogging(),
                 activeConfig.dragonDefinition(),
-                arena
+                arena,
+                activeConfig.rewardConfig()
         );
     }
 

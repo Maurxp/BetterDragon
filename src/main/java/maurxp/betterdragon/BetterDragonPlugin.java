@@ -27,12 +27,31 @@ import maurxp.betterdragon.combat.CombatRuntime;
 import maurxp.betterdragon.combat.CombatSnapshot;
 import maurxp.betterdragon.combat.DragonCombatListener;
 import maurxp.betterdragon.combat.ParticipantSnapshot;
+import maurxp.betterdragon.arena.ArenaRuleSet;
 import maurxp.betterdragon.config.ArenaConfigurationSnapshot;
+import maurxp.betterdragon.config.BattleConfigurationSnapshot;
 import maurxp.betterdragon.config.ConfigurationService;
+import maurxp.betterdragon.config.DragonDefinition;
+import maurxp.betterdragon.config.RewardConfigurationSnapshot;
+import maurxp.betterdragon.config.RewardItemDefinition;
+import maurxp.betterdragon.config.SlayerRewardDefinition;
 import maurxp.betterdragon.phase.PhaseRuntime;
 import maurxp.betterdragon.platform.bossbar.BossBarWorldListener;
 import maurxp.betterdragon.platform.bossbar.VanillaBossBarController;
 import maurxp.betterdragon.platform.bossbar.VanillaBossBarControllerFactory;
+import maurxp.betterdragon.reward.allocation.RewardAllocationEngine;
+import maurxp.betterdragon.reward.claim.ClaimStorage;
+import maurxp.betterdragon.reward.claim.InMemoryClaimStorage;
+import maurxp.betterdragon.reward.delivery.BukkitPlayerInventoryAdapter;
+import maurxp.betterdragon.reward.delivery.PlayerInventoryAdapter;
+import maurxp.betterdragon.reward.delivery.RewardDeliveryService;
+import maurxp.betterdragon.reward.event.BetterDragonRewardEvent;
+import maurxp.betterdragon.reward.event.RewardEventDispatcher;
+import maurxp.betterdragon.reward.model.ClaimStatus;
+import maurxp.betterdragon.reward.model.RewardAllocationPlan;
+import maurxp.betterdragon.reward.model.RewardClaim;
+import maurxp.betterdragon.reward.service.DragonRewardListener;
+import maurxp.betterdragon.reward.service.RewardService;
 import maurxp.betterdragon.util.BetterDragonKeys;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -75,6 +94,8 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
     private BattleSessionManager sessionManager;
     private DragonSpawner dragonSpawner;
     private BattleManager battleManager;
+    private ClaimStorage claimStorage;
+    private RewardService rewardService;
 
     @Override
     public void onEnable() {
@@ -127,9 +148,27 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
             DragonCombatListener combatListener = new DragonCombatListener(sessionManager, getLogger());
             getServer().getPluginManager().registerEvents(combatListener, this);
 
+            // 8. Inicializar subsistema de Recompensas (Fase 3.8)
+            this.claimStorage = new InMemoryClaimStorage();
+            RewardAllocationEngine allocationEngine = new RewardAllocationEngine();
+            PlayerInventoryAdapter inventoryAdapter = new BukkitPlayerInventoryAdapter(getLogger());
+            RewardDeliveryService deliveryService = new RewardDeliveryService(inventoryAdapter, claimStorage, getLogger());
+            RewardEventDispatcher rewardEventDispatcher = event -> getServer().getPluginManager().callEvent(event);
+            this.rewardService = new RewardService(
+                    sessionManager,
+                    configurationService,
+                    allocationEngine,
+                    deliveryService,
+                    claimStorage,
+                    rewardEventDispatcher,
+                    getLogger()
+            );
+            DragonRewardListener rewardListener = new DragonRewardListener(rewardService, getLogger());
+            getServer().getPluginManager().registerEvents(rewardListener, this);
+
             getServer().getPluginManager().registerEvents(this, this);
 
-            // 8. Tarea periódica de evaluación de fases y habilidades (Hilo principal)
+            // 9. Tarea periódica de evaluación de fases y habilidades (Hilo principal)
             getServer().getScheduler().runTaskTimer(this, () -> {
                 long currentTick = Bukkit.getCurrentTick();
                 for (BattleSession session : sessionManager.getAllSessions().values()) {
@@ -243,6 +282,14 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
         return dragonSpawner;
     }
 
+    public ClaimStorage getClaimStorage() {
+        return claimStorage;
+    }
+
+    public RewardService getRewardService() {
+        return rewardService;
+    }
+
     /**
      * Hook de verificación para la consola del servidor (automatización de pruebas
      * de integración).
@@ -265,6 +312,9 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
         } else if (cmd.equalsIgnoreCase("bd-test-victory")) {
             event.setCancelled(true);
             runVictoryVerification(event.getSender());
+        } else if (cmd.equalsIgnoreCase("bd-test-rewards")) {
+            event.setCancelled(true);
+            runRewardsVerification(event.getSender());
         }
     }
 
@@ -1110,6 +1160,155 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
         } catch (Exception e) {
             getLogger().log(Level.SEVERE,
                     "[VICTORY-TEST-ERROR] Excepción inesperada durante la verificación de victoria: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Ejecuta la suite de verificación runtime de Recompensas (Fase 3.8).
+     */
+    private void runRewardsVerification(CommandSender sender) {
+        getLogger().info("==================================================");
+        getLogger().info("  INICIANDO VERIFICACIÓN DE REWARDS (3.8)          ");
+        getLogger().info("==================================================");
+
+        try {
+            // 1. Verificar configuración productiva activa (segura por defecto)
+            var activeRewardConfig = configurationService.getActiveConfig().rewardConfig();
+            getLogger().info("[REWARD-CHECK-1] Configuración productiva verificada: enabled="
+                    + activeRewardConfig.enabled() + ", minParticipation=" + activeRewardConfig.minParticipationPercent()
+                    + "%, poolSize=" + activeRewardConfig.participationPool().size() + " (seguro por defecto).");
+
+            // 2. Preparar sesión de prueba con snapshot explícito y determinista
+            BattleId testBattleId = BattleId.random();
+            double testMinPercent = 20.0;
+            RewardConfigurationSnapshot testRewardConfig = new RewardConfigurationSnapshot(
+                    true,
+                    testMinPercent, // threshold explícito de la prueba: 20.0%
+                    List.of(new RewardItemDefinition("test_pool_diamond", "DIAMOND", 5)),
+                    new SlayerRewardDefinition(true, true, List.of(new RewardItemDefinition("test_slayer_netherite", "NETHERITE_INGOT", 1)))
+            );
+
+            BattleConfigurationSnapshot testBattleConfig = new BattleConfigurationSnapshot(
+                    false,
+                    false,
+                    DragonDefinition.defaults(),
+                    maurxp.betterdragon.arena.ArenaDefinition.defaults(),
+                    testRewardConfig
+            );
+
+            UUID testWorldId = UUID.randomUUID();
+            BattleSession testSession = new BattleSession(testBattleId, "rewards_test_world_" + testBattleId, testWorldId, testBattleConfig);
+            sessionManager.register(testSession);
+
+            try {
+                // 3. Simular participantes: total 1000.0 de daño
+                // p1 = 600.0 (60.0% >= 20.0%) -> elegible
+                // p2 = 300.0 (30.0% >= 20.0%) -> elegible
+                // p3 = 100.0 (10.0% < 20.0%)  -> NO elegible
+                UUID p1 = UUID.randomUUID();
+                UUID p2 = UUID.randomUUID();
+                UUID p3 = UUID.randomUUID();
+
+                List<ParticipantSnapshot> participants = List.of(
+                        new ParticipantSnapshot(p1, "PlayerOne_Eligible", "PlayerOne_Eligible", 600.0, 1L, 10L, 100L),
+                        new ParticipantSnapshot(p2, "PlayerTwo_Slayer", "PlayerTwo_Slayer", 300.0, 2L, 11L, 101L),
+                        new ParticipantSnapshot(p3, "PlayerThree_Ineligible", "PlayerThree_Ineligible", 100.0, 3L, 12L, 102L)
+                );
+                CombatSnapshot snapshot = new CombatSnapshot(testBattleId, participants, 12L, 1000.0);
+                BattleResult result = BattleResult.completed(
+                        testBattleId,
+                        java.time.Instant.now().minusSeconds(120),
+                        java.time.Instant.now(),
+                        p1, // Slayer: TOP_DAMAGE (p1 con 600)
+                        "PlayerOne_Eligible",
+                        snapshot
+                );
+
+                // 4. Suscribirse temporalmente al BetterDragonRewardEvent para verificar despacho
+                java.util.concurrent.atomic.AtomicInteger rewardEventCount = new java.util.concurrent.atomic.AtomicInteger(0);
+                Listener rewardEventListener = new Listener() {
+                    @EventHandler
+                    public void onReward(BetterDragonRewardEvent event) {
+                        if (event.getBattleId().equals(testBattleId)) {
+                            rewardEventCount.incrementAndGet();
+                        }
+                    }
+                };
+                getServer().getPluginManager().registerEvents(rewardEventListener, this);
+
+                try {
+                    // 5. Procesar victoria
+                    RewardAllocationPlan plan = rewardService.processVictory(result);
+                    if (plan.isEmpty()) {
+                        getLogger().severe("[REWARD-TEST-FAIL] El plan de recompensas devuelto está vacío.");
+                        return;
+                    }
+                    getLogger().info("[REWARD-CHECK-2] Plan de asignación calculado exitosamente (" + plan.allocations().size() + " asignaciones).");
+
+                    // 6. Verificar elegibilidad y redistribución proporcional:
+                    // p3 (10.0% daño < 20.0% threshold configurado) NO debe recibir recompensa de participación
+                    boolean p3HasParticipation = plan.allocations().stream()
+                            .anyMatch(a -> a.participantId().equals(p3) && a.source() == maurxp.betterdragon.reward.model.RewardSource.PARTICIPATION);
+                    if (p3HasParticipation) {
+                        getLogger().severe("[REWARD-TEST-FAIL] Participante no elegible (p3 al 10% < 20%) recibió recompensa de participación.");
+                        return;
+                    }
+                    getLogger().info("[REWARD-CHECK-3] Verificada exclusión de participante no elegible (p3 al 10.0% < threshold 20.0%).");
+
+                    // Verificar que p1 y p2 recibieron asignaciones de participación
+                    boolean p1HasParticipation = plan.allocations().stream()
+                            .anyMatch(a -> a.participantId().equals(p1) && a.source() == maurxp.betterdragon.reward.model.RewardSource.PARTICIPATION);
+                    boolean p2HasParticipation = plan.allocations().stream()
+                            .anyMatch(a -> a.participantId().equals(p2) && a.source() == maurxp.betterdragon.reward.model.RewardSource.PARTICIPATION);
+                    if (!p1HasParticipation || !p2HasParticipation) {
+                        getLogger().severe("[REWARD-TEST-FAIL] Participantes elegibles no recibieron recompensa.");
+                        return;
+                    }
+                    getLogger().info("[REWARD-CHECK-4] Participantes elegibles (p1 al 60.0% y p2 al 30.0% >= 20.0%) recibieron asignaciones.");
+
+                    // 7. Verificar persistencia de reclamos en ClaimStorage (0% pérdidas ante offline)
+                    var claimsP1 = claimStorage.findByPlayer(p1);
+                    if (claimsP1.isEmpty()) {
+                        getLogger().severe("[REWARD-TEST-FAIL] No se guardaron reclamos en ClaimStorage para p1.");
+                        return;
+                    }
+                    getLogger().info("[REWARD-CHECK-5] Reclamos protegidos en ClaimStorage (" + claimsP1.size() + " reclamos para p1).");
+
+                    // 8. Verificar despacho de BetterDragonRewardEvent
+                    if (rewardEventCount.get() != 1) {
+                        getLogger().severe("[REWARD-TEST-FAIL] Conteo de BetterDragonRewardEvent incorrecto: " + rewardEventCount.get());
+                        return;
+                    }
+                    getLogger().info("[REWARD-CHECK-6] BetterDragonRewardEvent despachado correctamente (conteo: 1).");
+
+                    // 9. Verificar idempotencia estricta: re-procesar no duplica reclamos ni eventos
+                    int claimsBeforeRetry = claimStorage.findByBattleId(testBattleId).size();
+                    RewardAllocationPlan retryPlan = rewardService.processVictory(result);
+                    int claimsAfterRetry = claimStorage.findByBattleId(testBattleId).size();
+
+                    if (claimsBeforeRetry != claimsAfterRetry) {
+                        getLogger().severe("[REWARD-TEST-FAIL] Idempotencia falló: se duplicaron reclamos en almacenamiento ("
+                                + claimsBeforeRetry + " vs " + claimsAfterRetry + ").");
+                        return;
+                    }
+                    getLogger().info("[REWARD-CHECK-7] Idempotencia estricta verificada: segundo procesamiento no duplicó reclamos.");
+
+                } finally {
+                    org.bukkit.event.HandlerList.unregisterAll(rewardEventListener);
+                }
+
+            } finally {
+                sessionManager.remove(testBattleId);
+            }
+
+            getLogger().info("==================================================");
+            getLogger().info("=== ALL REWARDS VERIFICATION CHECKS PASSED!    ===");
+            getLogger().info("==================================================");
+
+            Bukkit.getScheduler().runTask(this, Bukkit::shutdown);
+        } catch (Exception e) {
+            getLogger().log(Level.SEVERE,
+                    "[REWARD-TEST-ERROR] Excepción inesperada durante la verificación de recompensas: " + e.getMessage(), e);
         }
     }
 }

@@ -1,5 +1,7 @@
 package maurxp.betterdragon.config;
 
+import maurxp.betterdragon.arena.ArenaDefinition;
+
 import java.util.Objects;
 import java.util.Set;
 
@@ -28,7 +30,8 @@ public record BetterDragonConfig(
         boolean portalEnabled,
         String loggingLevel,
         boolean debugLogging,
-        DragonDefinition dragonDefinition) {
+        DragonDefinition dragonDefinition,
+        RewardConfigurationSnapshot rewardConfig) {
 
     public static final boolean DEFAULT_PORTAL_ENABLED = false;
     public static final String DEFAULT_LOGGING_LEVEL = "INFO";
@@ -45,13 +48,21 @@ public record BetterDragonConfig(
         }
         loggingLevel = upperLevel;
         Objects.requireNonNull(dragonDefinition, "dragonDefinition no puede ser nulo");
+        rewardConfig = rewardConfig != null ? rewardConfig : RewardConfigurationSnapshot.defaults();
     }
 
     /**
-     * Constructor retrocompatible para inicializaciones sin definición explícita de dragón.
+     * Constructor retrocompatible con definición de dragón y recompensas predeterminadas.
+     */
+    public BetterDragonConfig(boolean portalEnabled, String loggingLevel, boolean debugLogging, DragonDefinition dragonDefinition) {
+        this(portalEnabled, loggingLevel, debugLogging, dragonDefinition, RewardConfigurationSnapshot.defaults());
+    }
+
+    /**
+     * Constructor retrocompatible para inicializaciones sin definición explícita de dragón ni recompensas.
      */
     public BetterDragonConfig(boolean portalEnabled, String loggingLevel, boolean debugLogging) {
-        this(portalEnabled, loggingLevel, debugLogging, DragonDefinition.defaults());
+        this(portalEnabled, loggingLevel, debugLogging, DragonDefinition.defaults(), RewardConfigurationSnapshot.defaults());
     }
 
     /**
@@ -64,7 +75,8 @@ public record BetterDragonConfig(
                 DEFAULT_PORTAL_ENABLED,
                 DEFAULT_LOGGING_LEVEL,
                 DEFAULT_DEBUG_LOGGING,
-                DragonDefinition.defaults());
+                DragonDefinition.defaults(),
+                RewardConfigurationSnapshot.defaults());
     }
 
     /**
@@ -77,6 +89,8 @@ public record BetterDragonConfig(
         return new BattleConfigurationSnapshot(
                 this.portalEnabled,
                 this.debugLogging,
-                this.dragonDefinition);
+                this.dragonDefinition,
+                ArenaDefinition.defaults(),
+                this.rewardConfig);
     }
 }

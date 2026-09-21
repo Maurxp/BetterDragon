@@ -44,3 +44,39 @@ dragons:
       - id: "phase_4"
         threshold: 0.25
         abilities: []
+
+# ==============================================================================
+# SISTEMA DE RECOMPENSAS (FASE 3.8)
+# ==============================================================================
+rewards:
+  # Activar o desactivar la asignación y entrega de recompensas tras la victoria
+  # Seguro por defecto: desactivado hasta configuración explícita del servidor
+  enabled: false
+
+  # Porcentaje mínimo de daño sobre el total de la batalla para ser elegible (0.0 a 100.0)
+  # Participantes con daño menor no reciben del pool; su parte se redistribuye proporcionalmente.
+  # 0.0 es el valor técnico neutro predeterminado cuando rewards está deshabilitado.
+  min_participation_percent: 0.0
+
+  # Pool de ítems a repartir proporcionalmente entre participantes elegibles
+  # Por defecto vacío sin recompensas de gameplay inventadas.
+  # Ejemplo de sintaxis:
+  #   items:
+  #     - id: "participation_item_example"
+  #       material: "DIAMOND"
+  #       amount: 5
+  participation_pool:
+    items: []
+
+  # Recompensa adicional y exclusiva para el Slayer de la batalla (TOP_DAMAGE)
+  # Deshabilitado por defecto sin ítems inventados.
+  # Ejemplo de sintaxis:
+  #   items:
+  #     - id: "slayer_reward_example"
+  #       material: "NETHERITE_INGOT"
+  #       amount: 1
+  slayer_reward:
+    enabled: false
+    # Si es true, el Slayer debe alcanzar min_participation_percent para recibir esta recompensa
+    requires_eligibility: true
+    items: []

@@ -26,11 +26,24 @@ public record BattleConfigurationSnapshot(
         boolean portalEnabled,
         boolean debugLogging,
         DragonDefinition dragonDefinition,
-        ArenaDefinition arenaDefinition) {
+        ArenaDefinition arenaDefinition,
+        RewardConfigurationSnapshot rewardConfig) {
 
     public BattleConfigurationSnapshot {
         Objects.requireNonNull(dragonDefinition, "dragonDefinition no puede ser nulo");
         Objects.requireNonNull(arenaDefinition, "arenaDefinition no puede ser nulo");
+        rewardConfig = rewardConfig != null ? rewardConfig : RewardConfigurationSnapshot.defaults();
+    }
+
+    /**
+     * Constructor retrocompatible para inicializaciones sin especificación explícita de recompensas.
+     */
+    public BattleConfigurationSnapshot(
+            boolean portalEnabled,
+            boolean debugLogging,
+            DragonDefinition dragonDefinition,
+            ArenaDefinition arenaDefinition) {
+        this(portalEnabled, debugLogging, dragonDefinition, arenaDefinition, RewardConfigurationSnapshot.defaults());
     }
 
     /**
@@ -45,7 +58,7 @@ public record BattleConfigurationSnapshot(
             boolean portalEnabled,
             boolean debugLogging,
             DragonDefinition dragonDefinition) {
-        this(portalEnabled, debugLogging, dragonDefinition, ArenaDefinition.defaults());
+        this(portalEnabled, debugLogging, dragonDefinition, ArenaDefinition.defaults(), RewardConfigurationSnapshot.defaults());
     }
 
     /**
@@ -55,7 +68,7 @@ public record BattleConfigurationSnapshot(
      * @param debugLogging  si el log de depuración está activo
      */
     public BattleConfigurationSnapshot(boolean portalEnabled, boolean debugLogging) {
-        this(portalEnabled, debugLogging, DragonDefinition.defaults(), ArenaDefinition.defaults());
+        this(portalEnabled, debugLogging, DragonDefinition.defaults(), ArenaDefinition.defaults(), RewardConfigurationSnapshot.defaults());
     }
 
     /**
@@ -65,6 +78,6 @@ public record BattleConfigurationSnapshot(
      * @return snapshot con defaults
      */
     public static BattleConfigurationSnapshot defaults() {
-        return new BattleConfigurationSnapshot(false, false, DragonDefinition.defaults(), ArenaDefinition.defaults());
+        return new BattleConfigurationSnapshot(false, false, DragonDefinition.defaults(), ArenaDefinition.defaults(), RewardConfigurationSnapshot.defaults());
     }
 }

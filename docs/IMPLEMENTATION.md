@@ -25,9 +25,8 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 | **3.4** | **Combat Runtime** | Registro de participantes, tracking de daño en hilo principal, hitSequence monotónico, historicalName vs lastKnownName, TOP_DAMAGE con desempate determinista, evento BetterDragonDamageEvent, snapshots inmutables. | `DONE` |
 | **3.5** | **Motor de Habilidades y Fases** | Fases ordenadas, progresión monotónica por ratio de salud, AbilityEngine, TargetSelector, LocationResolver, efectos de combate (0% NMS), snapshots tipados, correcciones R1. | `COMPLETE` |
 | **3.6** | **Arena, Reglas y Límites** | Límites geométricos de arena, reglas anti-cheese, separación podium/centro, snapshot inmutable y correcciones R1. | `COMPLETE` |
-| **3.7–3.7-R1** | **Muerte, Victoria y BattleResult (y Cierre R1)** | Transición terminal a COMPLETED, consolidación de BattleResult con CombatSnapshot final, Slayer TOP_DAMAGE (2 criterios), supresión soberana de XP/drops, evento de victoria encapsulado. | `COMPLETE` |
-| **3.8** | **Recompensas y Claims** | Cálculo de botín, redistribución proporcional de no elegibles y buzón de claims en SQLite. | `TODO (Siguiente Fase)` |
-| **3.9** | **Persistencia SQLite** | Single-Writer Async Worker, migración de esquema y almacenamiento no bloqueante. | `TODO` |
+| **3.8–3.8-R2** | **Recompensas y Claims** | Hardening final: validación estricta de amount (enteros positivos exactos), Material nativo Paper API (sin heurísticos), Javadocs de idempotencia canónica, 245 tests unitarios. | `COMPLETE` |
+| **3.9** | **Persistencia SQLite** | Single-Writer Async Worker, almacenamiento persistente de claims y resultados históricos de batalla sin bloqueos. | `TODO (Siguiente Fase)` |
 | **3.10**| **Sistema de Leaderboard** | Agregación de estadísticas históricas (Top Slayers, Mayor Daño, Total Batallas) con caché en memoria. | `TODO` |
 | **3.11**| **Framework de Comandos & GUI** | Implementación de `/betterdragon` y `/bd` (`spawn`, `cancel`, `status`, `reload`, `top`, `claim`). | `TODO` |
 | **3.12**| **Hardening Final y Cierre** | Pruebas de estrés, auditoría final de rendimiento y release candidate. | `TODO` |
@@ -158,11 +157,60 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 
 ---
 
-## 7. Próxima Fase: Fase 3.8 — Recompensas y Claims `[PENDIENTE]`
+## 7. Estado de la Fase 3.8, 3.8-R1 & 3.8-R2 (Rewards — Hardening Final & Cierre) — `COMPLETE`
 
-- **Objetivo Arquitectónico:** Diseñar e implementar el sistema de recompensas de BetterDragon alimentado por el `BattleResult` inmutable emitido al completarse la victoria (Fase 3.7-R1).
+- **Modelos de Dominio Puros (`maurxp.betterdragon.reward.model`):**
+  - `RewardItem`: Representación inmutable 0% Bukkit del ítem de botín (`material`, `amount`, `displayName`, `lore`).
+  - `RewardSource`: Enumeración tipada (`PARTICIPATION`, `SLAYER`).
+  - `RewardAllocation`: Cuota individual inmutable calculada para un participante de la batalla, enriquecida con `rewardId`.
+  - `RewardAllocationPlan`: Plan global inmutable de asignaciones con conteo de participantes y daño total.
+  - `ClaimStatus`: Estados de ciclo de vida (`PENDING`, `CLAIMED`, `FAILED_RETRYABLE`).
+  - `RewardClaim`: Registro inmutable de reclamo con tracking atómico de `originalAmount`, `deliveredAmount`, marcas temporales y motivo de fallo.
+- **Identidad de Recompensa y Prevención de Colisiones (Auditoría 3.8-R1 / 3.8-R2):**
+  - `RewardItemDefinition`: Campo obligatorio `id` validado por regex `^[a-zA-Z0-9_-]+$`.
+  - `ConfigurationLoader`: Detección fail-fast de duplicados de `id` entre pool y slayer rewards.
+  - `RewardAllocation.idempotencyKey()`: Fórmula canónica actualizada a `battleId:participantId:rewardId`, garantizando que definiciones distintas con igual material no colisionen y produzcan reclamos independientes.
+  - **Saneamiento de Javadocs (3.8-R2):** Erradicación completa de referencias obsoletas que documentaban la clave como `battleId:playerId:source:material`.
+- **Endurecimiento de Validación de Cantidad (`amount` — Fase 3.8-R2):**
+  - `ConfigurationLoader.parseExactPositiveAmount`: Exige enteros positivos exactos mayores a 0 (`Integer`, `Long`, `Short`, `Byte`, `Double`, `Float`, `Number`).
+  - Rechaza sin truncamiento ni redondeo silencioso valores fraccionarios/decimales (`1.7`, `1.5`, `2.5`), cero (`0`), negativos (`-1`), no finitos (`NaN`, `Infinity`) y overflow (`> Integer.MAX_VALUE`).
+  - Acepta representaciones numéricas que equivalen exactamente a enteros positivos (como `2.0` entregado como Double por YAML).
+  - Los mensajes de excepción identifican de manera unívoca la ruta, el identificador `rewardId` y el campo `'amount'`.
+- **Validación Nativa de Material Paper API (Fase 3.8-R2):**
+  - Validación directa mediante `Material.matchMaterial(material)` de Paper/Bukkit.
+  - Eliminación total de heurísticos regex/palabras prohibidas (`isValidMaterialFallback`), impidiendo que nombres inexistentes con formato plausible (`FOO_BAR`, `FAKE_MATERIAL`, `INVALID_MATERIAL`) sean considerados válidos.
+  - Rechazo explícito de tipos de aire (`AIR`, `CAVE_AIR`, `VOID_AIR`) mediante comparación de enums desacoplada de la inicialización de registros legacy de Paper en entornos de test.
+- **Defaults Técnicos Neutros:**
+  - Eliminación de defaults inventados de gameplay (ni diamantes ni netherite en código de producción).
+  - `RewardConfigurationSnapshot.defaults()`: `enabled = false`, `min_participation_percent = 0.0`, listas vacías.
+  - `config.yml`: `rewards.enabled: false`, `min_participation_percent: 0.0`, con ejemplos comentados como documentación sintáctica.
+- **Motor de Asignación Funcional Puro (`maurxp.betterdragon.reward.allocation`):**
+  - `RewardAllocationEngine`: Componente 100% desacoplado de Bukkit que calcula elegibilidad ($\ge \text{min\_participation\_percent}$ y daño $> 0$), redistribución proporcional de remanentes de no elegibles y redondeo determinista de unidades enteras con desempate por `firstHitSequence ASC`.
+- **Capa de Entrega y Buzón de Reclamos (`maurxp.betterdragon.reward.delivery` y `maurxp.betterdragon.reward.claim`):**
+  - `PlayerInventoryAdapter`: Interfaz para desacoplar la entrega física del motor de dominio.
+  - `BukkitPlayerInventoryAdapter`: Implementación de Paper con `inventory.addItem()` y cómputo de *leftovers*.
+  - `RewardDeliveryService`: Orquestador de entregas que gestiona estados online/offline, saturación de inventario y reintentos.
+  - `ClaimStorage`: Abstracción de almacenamiento para resguardo de recompensas no entregadas.
+  - `InMemoryClaimStorage`: Implementación concurrente en memoria para la Fase 3.8/3.8-R1. Límites formalmente documentados: el almacenamiento es volátil durante el ciclo de vida del proceso de la JVM (no durable ante caídas o reinicios).
+- **Servicios y Eventos Públicos (`maurxp.betterdragon.reward.service` y `maurxp.betterdragon.reward.event`):**
+  - `BetterDragonRewardEvent`: Evento informativo de Bukkit que expone el plan y los resultados de entrega inmutables.
+  - `RewardEventDispatcher`: Despachador funcional para pruebas desacopladas.
+  - `RewardService`: Coordinador central tras la victoria con soporte para `processVictory` y `retryPendingClaims`.
+  - `DragonRewardListener`: Listener de Bukkit (`BetterDragonVictoryEvent`, `PlayerJoinEvent`, MONITOR) para entrega automática y reintentos en reconexión.
+- **Pruebas Unitarias de Recompensas (47 pruebas exhaustivas):**
+  - `RewardEligibilityAndAllocationTest` (13 pruebas): casos límite de 1 jugador, múltiples, todos, ninguno, daño 0, min 0%, min 100%, valores extremos, empates, Slayer con desempate y compuertas de elegibilidad.
+  - `RewardDeliveryAndClaimTest` (6 pruebas): online, offline, inventario lleno, entrega parcial, reintento tras liberar espacio y captura de fallos transitorios.
+  - `RewardIdempotencyTest` (4 pruebas): estabilidad de claves canónicas, prevención de colisiones para igual material con distinto `rewardId`, no duplicación ante doble entrega y doble llamada a `processVictory`.
+  - `RewardConfigurationLoaderTest` (21 pruebas): parseo de YAML, valores por defecto neutrales, rechazo de IDs duplicados o faltantes, rechazo de decimales (`1.7`, `1.5`, `2.5`), aceptación de enteros dobles (`2.0`), rechazo de no positivos y desbordamiento, rechazo de materiales inexistentes (`FOO_BAR`, `FAKE_MATERIAL`, `INVALID_MATERIAL`), rechazo de aire, aceptación de materiales reales (`NETHERITE_SWORD`, `GOLDEN_APPLE`, `ENDER_PEARL`).
+  - `RewardIntegrationTest` (3 pruebas): flujo completo desde evento de victoria hasta resguardo en claims y reconexión.
+  - **Total de pruebas unitarias del proyecto:** 245 pruebas ejecutadas en Maven, 0 fallos, 0 errores, 0 omitidos.
+
+---
+
+## 8. Próxima Fase: Fase 3.9 — Persistencia / Claims (SQLite) `[PENDIENTE]`
+
+- **Objetivo Arquitectónico:** Implementar la infraestructura de persistencia SQLite asíncrona para registrar resultados de batallas y respaldar `ClaimStorage` de forma duradera entre reinicios.
 - **Alcance Planificado:**
-  - Determinación de botín exclusivo para el Slayer (`TOP_DAMAGE`).
-  - Distribución escalonada/proporcional de recompensas para participantes elegibles según contribución de daño.
-  - Mitigación para inventarios llenos o participantes desconectados vía buzón de claims (respaldado por SQLite en 3.9).
-- **Cero Implementación Anticipada:** Todo el motor de recompensas permanece en estado de diseño y se implementará formalmente durante la Fase 3.8. Ninguna lógica de recompensas está activa en el runtime actual.
+  - Single-Writer Async Worker no bloqueante.
+  - Migración y versionado de esquema DDL en SQLite (`betterdragon.db`).
+  - Implementación `SqliteClaimStorage` conectada a `RewardService`.

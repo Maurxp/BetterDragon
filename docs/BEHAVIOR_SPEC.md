@@ -191,14 +191,22 @@ La batalla opera como una Máquina de Estados Finitos (FSM) confinada al hilo pr
 
 ---
 
-## 7. Recompensas, Claims y Persistencia (Fases Futuras: 3.8 y 3.9) `[PENDIENTE]`
+## 7. Recompensas, Claims y Persistencia
 
-- **Recompensas Propias de BetterDragon (Fase 3.8 - Siguiente Fase):**
-  - Las recompensas de BetterDragon **NO están implementadas todavía** en el runtime.
-  - Diseño conceptual: recompensa exclusiva para el Slayer (`TOP_DAMAGE`) y botín escalonado/proporcional por porcentaje de contribución, a implementarse formalmente en la Fase 3.8 consumiendo `BattleResult`.
-- **Buzón de Claims (Fase 3.8):**
-  - Si el inventario de un participante está lleno o el jugador está desconectado, los ítems se guardan en el buzón y se retiran con `/bd claim`. `[PENDIENTE FASE 3.8]`
-- **Persistencia SQLite (Fase 3.9):**
-  - Almacenamiento no bloqueante mediante un worker asíncrono de escritor único (*Single-Writer Async Worker*). `[PENDIENTE FASE 3.9]`
+- **Recompensas Propias de BetterDragon (Fase 3.8 / 3.8-R1 / 3.8-R2) `[COMPLETADA]`:**
+  - El sistema de recompensas se activa exclusivamente tras la victoria formal (`COMPLETED`) a través de `BetterDragonVictoryEvent`.
+  - **Defaults Técnicos Seguros:** `rewards.enabled: false`, `min_participation_percent: 0.0`, y pools de ítems vacíos por defecto. Sin ítems de gameplay arbitrarios en código ni en configuración estándar.
+  - **Identidad de Recompensa Obligatoria (`rewardId`):** Cada ítem configurado requiere un `id` alfanumérico único (`^[a-zA-Z0-9_-]+$`). El cargador de configuración rechaza colisiones entre pool y slayer rewards fail-fast.
+  - **Validación Estricta de Cantidad (`amount` — 3.8-R2):** `amount` debe ser un entero positivo exacto mayor a 0. Se rechazan valores decimales/fraccionarios (`1.7`, `1.5`, `2.5`), no positivos (`0`, `-1`), no finitos (`NaN`, `Infinity`) y overflow (`> Integer.MAX_VALUE`). Se aceptan valores numéricos que representan exactamente un entero positivo (como `2.0` entregado por parsers YAML) sin truncamiento ni redondeo silencioso. Los mensajes de error identifican con claridad la ruta, `rewardId` y `'amount'`.
+  - **Validación Nativa de Material (Paper API — 3.8-R2):** El material se valida directamente contra la API oficial mediante `Material.matchMaterial(material)`. Se eliminaron por completo fallbacks heurísticos regex/blacklist (`isValidMaterialFallback`), rechazando materiales inexistentes de formato plausible (`FOO_BAR`, `FAKE_MATERIAL`, `INVALID_MATERIAL`) y tipos de aire (`AIR`, `CAVE_AIR`, `VOID_AIR`).
+  - **Elegibilidad Invariante:** Un jugador es elegible si su daño acumulado real en `CombatSnapshot` alcanza o supera `min_participation_percent` del daño total y `participant.totalDamage > 0`. Participantes con daño menor o igual a cero jamás son elegibles, incluso si `min_participation_percent = 0.0`.
+  - **Redistribución Proporcional:** Las porciones que habrían correspondido a participantes no elegibles se redistribuyen íntegramente y de manera proporcional entre los participantes elegibles según su daño relativo.
+  - **Redondeo Determinista:** Las cuotas fraccionarias se truncan a enteros base y las unidades de remanente se asignan de a una por orden de mayor residuo decimal, desempatando por `firstHitSequence ASC` y UUID lexicográfico.
+  - **Slayer (`TOP_DAMAGE`):** Recompensa adicional configurable adjudicada al Slayer resuelto en `BattleResult`, evaluando la compuerta `requires_eligibility`.
+  - **Buzón de Reclamos y Cero Pérdidas:** Si el jugador está desconectado o su inventario saturado, las unidades no entregadas quedan resguardadas en `ClaimStorage` en estado `PENDING`. Al reconectarse o liberar ranuras, se entregan automáticamente.
+  - **Idempotencia Estricta y Prevención de Colisiones:** Deduplicación determinista por clave canónica `battleId:participantId:rewardId`. Distintas definiciones con el mismo material no colisionan, permitiendo la coexistencia de reclamos independientes. Reintentos, doble procesamiento y reconexiones nunca duplican ítems físicos. Toda documentación y Javadoc fue saneado para erradicar referencias obsoletas a `source:material`.
+  - **Límites de Almacenamiento en Memoria:** `InMemoryClaimStorage` es un resguardo volátil en memoria del proceso. Los reclamos no sobreviven a reinicios ni detenciones del servidor.
+- **Persistencia SQLite (Fase 3.9) `[PENDIENTE]`:**
+  - Migración del buzón de claims y registro histórico de batallas a SQLite mediante un worker asíncrono de escritor único (*Single-Writer Async Worker*), recuperación de claims pendientes al inicio del servidor y comando `/bd claim`. `[PENDIENTE FASE 3.9]`
 - **Recuperación tras Reinicio:**
   - Dragones con PDC detectados durante el arranque sin batalla activa en memoria son removidos de forma limpia para evitar entidades huérfanas. `[CONSOLIDADO EN 3.3-R1]`

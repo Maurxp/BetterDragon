@@ -21,7 +21,8 @@
 - **Fase 3.5–3.5-R1:** Combat Phases & Abilities (Fases Ordenadas, Monotonicidad, AbilityEngine) `[DONE]`
 - **Fase 3.6–3.6-R1:** Arena, Reglas y Límites (Geometría AABB, arenas.yml, Snapshot Inmutable, 0% NMS) `[DONE]`
 - **Fase 3.7–3.7-R1:** Muerte, Victoria y BattleResult (Idempotencia, Supresión XP/Drops, Encapsulación Evento) `[DONE]`
-- **Próxima Fase:** Fase 3.8 — Recompensas y Claims `[TODO]`
+- **Fase 3.8–3.8-R2:** Recompensas y Claims (Elegibilidad por daño real, Redistribución Proporcional, Redondeo Determinista, Identidad por `rewardId`, Idempotencia Canónica `battleId:participantId:rewardId`, Validación Estricta de Amount y Material Paper nativo, Safe Defaults neutrales y Claims en memoria) `[DONE]`
+- **Próxima Fase:** Fase 3.9 — Persistencia / Claims (SQLite Durable Storage, Single-Writer Async Worker) `[TODO]`
 
 ---
 

@@ -403,6 +403,97 @@ arenas.yml ──► [ArenaConfigurationLoader] ──► [ArenaConfigurationSna
 - **Encapsulación Estricta de Runtime:** `BetterDragonVictoryEvent` NO expone `BattleSession` ni ningún runtime mutable interno (`CombatRuntime`, `PhaseRuntime`, `AbilityEngine`). Los consumidores externos acceden a los datos de la batalla exclusivamente a través de `BattleResult`.
 - Desacoplado mediante la interfaz funcional `VictoryEventDispatcher` para habilitar pruebas unitarias puras sin necesidad de un servidor Bukkit mockeado.
 
-### 9.7 Límites Estrictos y Transición a Fase 3.8
-- En la Fase 3.7-R1 **NO** se implementan recompensas, entrega de ítems, claims, base de datos SQLite, leaderboard, portal central, generación de Dragon Egg ni comandos de administración.
-- **Transición a la Fase 3.8 (Rewards):** Habiéndose completado y validado el ciclo terminal de defunción y victoria (Fase 3.7 y 3.7-R1), la siguiente etapa de desarrollo es la **Fase 3.8 — Recompensas y Claims**, la cual consumirá el `BattleResult` inmutable emitido en la victoria.
+### 9.7 Transición de Fase
+- **Fase 3.7 y 3.7-R1 Completadas:** El ciclo terminal de defunción, supresión vanilla, resolución de Slayer y emisión desacoplada de `BetterDragonVictoryEvent` quedó consolidado y blindado contra regresiones.
+
+---
+
+## 10. Recompensas, Asignación y Buzón de Reclamos (Fase 3.8 / 3.8-R1 / 3.8-R2)
+
+### 10.1 Cadena Conceptual de Recompensas
+El subsistema de recompensas de BetterDragon desacopla estrictamente el ciclo de combate de la adjudicación y la entrega de botín:
+```text
+Combat (CombatRuntime)
+  ↓
+CombatSnapshot (Inmutable)
+  ↓
+BattleResult (Inmutable)
+  ↓
+Victory (BetterDragonVictoryEvent)
+  ↓
+Reward Eligibility (Cálculo puro de umbral de daño real)
+  ↓
+Reward Allocation (Redistribución proporcional y redondeo determinista con rewardId)
+  ↓
+Reward Delivery (Entrega física en inventario con gestión de leftovers)
+  ↓
+Claim Storage (Buzón de reclamos en memoria PENDING / CLAIMED / FAILED_RETRYABLE)
+```
+
+### 10.2 Modelo de Dominio Desacoplado (0% Bukkit)
+- **Aislamiento Total de Plataforma:** Las clases en `maurxp.betterdragon.reward.model` no importan `ItemStack`, `Player`, `Entity` ni `World`.
+- **`RewardItem`:** Representación canónica inmutable del ítem de recompensa (`String material`, `int amount`, `displayName`, `lore`).
+- **`RewardAllocation`:** Cuota individual inmutable calculada para un participante (`BattleId`, `UUID participantId`, `String participantName`, `RewardSource source`, `String rewardId`, `RewardItem item`, `double participationPercent`, `Instant allocatedAt`).
+- **`RewardAllocationPlan`:** Plan de asignación global de la batalla (`BattleId`, lista de `RewardAllocation`, listas de participantes elegibles/no elegibles, daño total y daño elegible).
+- **`RewardClaim`:** Registro inmutable del reclamo de un participante, con tracking atómico de `originalAmount`, `deliveredAmount`, `ClaimStatus` (`PENDING`, `CLAIMED`, `FAILED_RETRYABLE`), marcas temporales y motivo de fallo opcional.
+
+### 10.3 Reglas de Elegibilidad, Identidad y Defaults Seguros
+1. **Identidad Estricta de Recompensas (`rewardId`):**
+   - Toda definición de ítem (`RewardItemDefinition`) requiere obligatoriamente un `id` alfanumérico único (`^[a-zA-Z0-9_-]+$`).
+   - El `ConfigurationLoader` valida la unicidad global de `id` entre el pool de participación y las recompensas de slayer, rechazando de forma fail-fast cualquier duplicado.
+2. **Validación Estricta de Cantidad (`amount` — Fase 3.8-R2):**
+   - `amount` representa una cantidad entera positiva exacta mayor a 0.
+   - Se rechaza de forma fail-fast cualquier valor no entero o no positivo: números decimales/fraccionarios (`1.7`, `1.5`, `2.5`), cero (`0`), negativos (`-1`), no finitos (`NaN`, `Infinity`) y desbordamientos (`> Integer.MAX_VALUE`).
+   - Valores numéricos que representan exactamente un entero positivo (por ejemplo `2.0` entregado como `Double` por parsers YAML) son aceptados con precisión matemática sin truncamiento ni redondeo silencioso.
+   - El mensaje de error de configuración identifica con precisión la ruta, el identificador `rewardId` y el campo `'amount'`.
+3. **Validación Nativa de Material (Paper API — Fase 3.8-R2):**
+   - Validación estricta contra la API real de Paper/Bukkit mediante `Material.matchMaterial(material)`.
+   - Se eliminaron por completo fallbacks heurísticos basados en expresiones regulares o listas de palabras prohibidas (`isValidMaterialFallback`), garantizando que nombres plausibles pero inexistentes (`FOO_BAR`, `FAKE_MATERIAL`, `INVALID_MATERIAL`) sean rechazados en la carga de configuración.
+   - Se rechazan explícitamente materiales de tipo aire (`AIR`, `CAVE_AIR`, `VOID_AIR`).
+4. **Defaults Neutros y No Inventados:**
+   - La configuración por defecto del plugin (`RewardConfigurationSnapshot.defaults()` y `config.yml`) inicia con `rewards.enabled: false`, `min_participation_percent: 0.0` y listas de ítems vacías.
+   - Cero asunciones de gameplay inventado (sin diamantes, netherite ni esmeraldas forzadas en código de producción).
+5. **Elegibilidad por Daño Real:**
+   $$\text{participationPercent} = \frac{\text{participant.totalDamage}}{\text{totalBattleDamage}} \times 100$$
+   Un participante es elegible si y solo si $\text{participationPercent} \ge \text{min\_participation\_percent}$ y $\text{participant.totalDamage} > 0$.
+   - Si $\text{totalBattleDamage} == 0$ o ningún participante alcanza el umbral, el sistema retorna de forma segura y determinista un `RewardAllocationPlan.empty(battleId)`.
+6. **Redistribución Proporcional de No Elegibles:**
+   - La cuota de los participantes no elegibles nunca se pierde silenciosamente; se redistribuye entre los participantes elegibles proporcionalmente a sus participaciones relativas:
+     $$\text{relativeShare} = \frac{\text{participant.totalDamage}}{\text{eligibleDamage}} \times \text{totalPoolUnits}$$
+
+### 10.4 Redondeo Determinista de Unidades Enteras
+1. **Unidades Base:** Cada participante elegible recibe $\lfloor \text{relativeShare} \rfloor$.
+2. **Cálculo de Remanente:** $\text{remainderUnits} = \text{totalPoolUnits} - \sum \text{baseUnits}$.
+3. **Distribución del Remanente:** Si $\text{remainderUnits} > 0$, las unidades sobrantes se asignan de a una unidad (1 ítem) a los participantes ordenados por:
+   - Mayor fracción decimal residual (`fraction DESC`).
+   - Empate en fracción: menor `firstHitSequence` (`firstHitSequence ASC`, quien asestó el primer impacto en combate).
+   - Estabilidad absoluta: `participantId` lexicográfico (`UUID ASC`).
+
+### 10.5 Recompensa de Slayer (`TOP_DAMAGE`)
+- La identidad del Slayer proviene exclusivamente de `BattleResult.slayerUniqueId()`, resuelto al morir el dragón con los 2 criterios inmutables (`totalDamage DESC` y `firstHitSequence ASC`).
+- Si `slayer_reward.enabled = true`, se adjudica el paquete de ítems configurado. Si `requires_eligibility = true`, el Slayer solo lo recibe si superó el porcentaje mínimo de participación general.
+
+### 10.6 Separación de Allocation vs Delivery y Protección de Reclamos
+- **Allocation Engine (`RewardAllocationEngine`):** Componente funcional puro que recibe `BattleResult` y `RewardConfigurationSnapshot` y genera `RewardAllocationPlan`. Cero efectos colaterales de inventario o Bukkit.
+- **Delivery Service (`RewardDeliveryService`):** Orquestador de entrega física asistido por `PlayerInventoryAdapter`:
+  - **Jugador Online:** Intenta entrega con `inventory.addItem()`.
+  - **Jugador Offline:** El reclamo se almacena intacto en `ClaimStorage` con estado `PENDING` (`deliveredAmount = 0`). Cero ítems perdidos.
+  - **Inventario Saturado / Entrega Parcial:** Se computan los *leftovers* exactos; las unidades que cupieron actualizan `deliveredAmount`, y el remanente permanece como `PENDING`. Ningún ítem se descarta ni se arroja descontroladamente al suelo.
+  - **Reconexión / Reintento:** Al reconectarse el jugador o liberar ranuras, `retryPendingForPlayer` completa la entrega de los ítems pendientes y transiciona el reclamo a `CLAIMED`.
+  - **Resiliencia ante Fallos:** Si ocurre una excepción inesperada durante la manipulación de inventario, el reclamo pasa a `FAILED_RETRYABLE` preservando el estado para reintento.
+
+### 10.7 Idempotencia Canónica y Prevención de Colisiones
+- **Fórmula Canónica de Idempotencia:**
+  $$\text{idempotencyKey} = \text{battleId} + ":" + \text{participantId} + ":" + \text{rewardId}$$
+- **Prevención de Colisiones y Saneamiento Global:**
+  - En la auditoría 3.8-R1 y saneamiento 3.8-R2 se consolidó el uso exclusivo de `rewardId` como discriminador canónico en la clave de deduplicación. Toda documentación y Javadoc obsoleto que hacía referencia a `source:material` fue erradicado.
+  - Si dos definiciones de recompensa configuran el mismo material (por ejemplo, `pool_diamonds: DIAMOND x5` y `slayer_bonus: DIAMOND x10`), ambas poseen `rewardId` distintos, produciendo claves de idempotencia distintas y permitiendo la coexistencia y entrega independiente de ambos reclamos sin colisión.
+- Si una recompensa ya se encuentra en estado `CLAIMED` en `ClaimStorage`, cualquier invocación repetida de entrega es un no-op inmediato que no duplica ítems físicos.
+- El doble procesamiento de un `BattleResult` (por doble listener o retry) es seguro e inocuo.
+
+### 10.8 Límites de Almacenamiento en Memoria y Frontera con Fase 3.9
+- **`InMemoryClaimStorage` (Fase 3.8 / 3.8-R1):**
+  - Almacenamiento concurrente seguro (`ConcurrentHashMap`) limitado al ciclo de vida del proceso de la JVM.
+  - **Límites Documentados:** Los reclamos resguardados en memoria **NO** son persistentes ante reinicios del servidor, detenciones o recargas del plugin (`crash/restart`).
+- **Frontera Estricta con Fase 3.9:**
+  - La persistencia duradera en base de datos relacional SQLite (`betterdragon.db`), la recuperación de claims pendientes al encender el servidor y los comandos de usuario final (`/bd claim`) forman parte exclusiva de la **Fase 3.9**. La interfaz `ClaimStorage` garantiza que este paso se dará sin tocar el motor de recompensas.
