@@ -26,10 +26,10 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 | **3.5** | **Motor de Habilidades y Fases** | Fases ordenadas, progresión monotónica por ratio de salud, AbilityEngine, TargetSelector, LocationResolver, efectos de combate (0% NMS), snapshots tipados, correcciones R1. | `COMPLETE` |
 | **3.6** | **Arena, Reglas y Límites** | Límites geométricos de arena, reglas anti-cheese, separación podium/centro, snapshot inmutable y correcciones R1. | `COMPLETE` |
 | **3.8–3.8-R2** | **Recompensas y Claims** | Hardening final: validación estricta de amount (enteros positivos exactos), Material nativo Paper API (sin heurísticos), Javadocs de idempotencia canónica, 245 tests unitarios. | `COMPLETE` |
-| **3.9** | **Persistencia SQLite** | Single-Writer Async Worker, almacenamiento durable de claims en SQLite (`betterdragon.db`), versionado v1, restart recovery, no-blocking async, 260 tests. | `COMPLETE` |
-| **3.10**| **Sistema de Leaderboard** | Agregación de estadísticas históricas (Top Slayers, Mayor Daño, Total Batallas) con caché en memoria. | `TODO (Siguiente Fase)` |
-| **3.11**| **Framework de Comandos & GUI** | Implementación de `/betterdragon` y `/bd` (`spawn`, `cancel`, `status`, `reload`, `top`, `claim`). | `TODO` |
-| **3.12**| **Hardening Final y Cierre** | Pruebas de estrés, auditoría final de rendimiento y release candidate. | `TODO` |
+| **3.9–3.9-R2** | **Persistencia SQLite** | Single-Writer Async Worker, almacenamiento durable de claims en SQLite (`betterdragon.db`), versionado v1, restart recovery, protección terminal CLAIMED, no-blocking async, 271 tests. | `COMPLETE` |
+| **3.10** | **Sistema de Leaderboard** | Leaderboard persistente, SQLite schema v2, migración v1 → v2, historial de batallas y participación, estadísticas por UUID, rankings deterministas, transacciones atómicas, idempotencia, BattleResult, persistencia async, 289 tests. | `COMPLETE` |
+| **3.11** | **Commands / Admin UX** | Implementación de comandos administrativos y de consulta (`/betterdragon` y `/bd`: `spawn`, `cancel`, `status`, `reload`, `top`, `claim`). | `TODO (Siguiente Fase)` |
+| **3.12** | **Hardening Final y Cierre** | Pruebas de estrés, auditoría final de rendimiento y release candidate. | `TODO` |
 
 ---
 
@@ -239,10 +239,50 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
   - Integración completa con `RewardDeliveryService` sobre SQLite real.
   - Rechazo fail-safe de versiones futuras de esquema (`version 99`).
   - Captura controlada de excepciones al operar sobre almacenamiento cerrado.
-  - **Total de pruebas del proyecto:** 260 pruebas ejecutadas, 0 fallos, 0 errores, 0 omitidos.
+  - **Total de pruebas del proyecto:** 271 pruebas ejecutadas, 0 fallos, 0 errores, 0 omitidos.
 
 ---
 
-## 9. Próxima Fase: Fase 3.10 — Sistema de Leaderboard `[PENDIENTE]`
+## 9. Estado de la Fase 3.10 (Leaderboard Persistente) — `COMPLETE`
 
-- **Objetivo Arquitectónico:** Implementar agregación de estadísticas históricas de batallas (Top Slayers, Mayor Daño, Total Batallas Ganadas) respaldadas en SQLite con caché en memoria para consultas eficientes de alta velocidad.
+- **Modelos Inmutables de Dominio (`maurxp.betterdragon.leaderboard.model`):**
+  - `LeaderboardBattleRecord`: Representación inmutable del histórico de una batalla (`battleId`, `completedAt`, `worldName`, `slayerUuid`).
+  - `LeaderboardParticipantRecord`: Registro inmutable de participación individual preservando `historicalName` y `lastKnownName`, daño exacto (`double`), secuencia de impacto (`firstHitSequence`), indicador de Slayer (`wasSlayer`) y timestamp.
+  - `LeaderboardPlayerStats`: Estadísticas acumuladas por UUID (`playerUuid`, `lastKnownName`, `battlesParticipated`, `totalDamage`, `highestDamage`, `slayerCount`, `firstParticipationAt`, `lastParticipationAt`). Incluye `getAverageDamage()` calculado dinámicamente sin persistirlo en base de datos.
+- **Persistencia Relacional SQLite (`maurxp.betterdragon.leaderboard.storage` y `persistence`):**
+  - `LeaderboardStorage`: Contrato asíncrono basado en `CompletableFuture` para registro y consultas.
+  - `SQLiteLeaderboardStorage`: Implementación con transacciones atómicas SQLite sobre la conexión compartida en `DatabaseManager`.
+  - Inserción idempotente con `ON CONFLICT(battle_id) DO NOTHING`. Ante re-ejecución, la transacción se cancela sin tocar acumulados ni participaciones.
+  - Actualización atómica de acumulados con `INSERT ... ON CONFLICT(player_uuid) DO UPDATE` y funciones SQL (`MAX`, `MIN`).
+  - Índices optimizados para rankings y desempate: `total_damage DESC, player_uuid ASC`, `slayer_count DESC, player_uuid ASC`, `battles_participated DESC, player_uuid ASC`.
+- **Evolución del Esquema (`SchemaInitializer`):**
+  - `CURRENT_SCHEMA_VERSION = 2`.
+  - Migración no destructiva desde v1: crea tablas `bd_leaderboard_battles`, `bd_leaderboard_participation`, `bd_leaderboard_players` e índices, preservando `bd_reward_claims` íntegra.
+  - Inicialización limpia directa en v2 para bases nuevas.
+- **Servicios de Aplicación y Eventos (`maurxp.betterdragon.leaderboard.service`):**
+  - `LeaderboardService`: Transforma `BattleResult` inmutable en registros del leaderboard sin tocar objetos Bukkit ni bloquear el hilo principal.
+  - `DragonLeaderboardListener`: Captura `BetterDragonVictoryEvent` con prioridad `MONITOR` y despacha el registro asíncrono.
+  - Integración en ciclo de vida en `BetterDragonPlugin`: inicialización en `onEnable()` y cierre ordenado en `onDisable()`.
+- **Pruebas Exhaustivas de Persistencia (`SQLiteLeaderboardStorageTest` — 18 pruebas):**
+  - Creación de esquema v2 en DB nueva.
+  - Migración explícita v1 -> v2 con conservación íntegra de claims preexistentes.
+  - Idempotencia de reinicialización en v2.
+  - Rechazo fail-safe de versiones futuras (v3+).
+  - Registro y recuperación de batallas y participaciones con timestamps y metadatos.
+  - Acumulación correcta de múltiples batallas (caso 5000 + 7200 + 6100 = 18300, max 7200, participaciones 3).
+  - Slayer count e incremento condicional (`was_slayer = true`).
+  - Idempotencia ante ejecución 3x de la misma batalla (1 batalla, sin duplicación de daño ni participaciones).
+  - Aislamiento estricto entre jugadores y entre batallas.
+  - Preservación de `historicalName` y actualización de `lastKnownName` tras cambios de nombre.
+  - Supervivencia y recuperación tras reinicio del proceso (cierre y reapertura física de SQLite).
+  - Consultas de ranking con límites y desempate determinista por `player_uuid ASC`.
+  - Comportamiento ante tablas vacías y límites inválidos.
+  - Concurrencia multihilo sobre el mismo `battle_id`.
+  - Consumo directo de `BattleResult` y rechazo de batallas no victoriosas.
+- **Total de pruebas del proyecto:** 289 pruebas ejecutadas, 0 fallos, 0 errores, 0 omitidos.
+
+---
+
+## 10. Próxima Fase: Fase 3.11 — Commands / Admin UX `[PENDIENTE]`
+
+- **Objetivo Arquitectónico:** Implementar la capa de comandos y administración/UX del plugin (`/betterdragon` y `/bd`), comandos administrativos (`spawn`, `cancel`, `status`, `reload`) y consultas del leaderboard mediante comandos (`/bd top`, `/bd stats`).

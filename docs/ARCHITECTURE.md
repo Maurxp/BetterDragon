@@ -611,3 +611,82 @@ Durante `onDisable()`:
 1. Se rechazan nuevos trabajos en `DatabaseManager`.
 2. El ejecutor dedicado `persistenceExecutor` ejecuta las tareas en cola y se cierra con `shutdown()` y espera controlada (`awaitTermination(5, SECONDS)`).
 3. La conexión JDBC `connection.close()` se cierra formalmente, forzando la sincronización de cualquier journal pendiente.
+
+---
+
+## 12. Subsistema de Leaderboard Persistente (Fase 3.10)
+
+### 12.1 Flujo y Desacoplamiento de Datos
+El leaderboard consume exclusivamente el resultado formal inmutable producido al completarse una batalla:
+```
+BetterDragonVictoryEvent (Bukkit Event / MONITOR)
+       │
+       ▼
+   BattleResult (Immutable DTO)
+       │
+       ▼
+DragonLeaderboardListener (Bukkit Listener)
+       │
+       ▼
+LeaderboardService (Application Service)
+       │
+       ▼ (Transformación a records inmutables)
+SQLiteLeaderboardStorage (JDBC / Single-Writer Async)
+       │
+       ▼ (BEGIN TRANSACTION ... COMMIT)
+    SQLite (betterdragon.db)
+```
+
+### 12.2 Separación Estricta de Persistencia y Convivencia de Esquema
+- **Convivencia:** Leaderboard y Rewards conviven en la misma base de datos relacional (`betterdragon.db`) y comparten el mismo ejecutor monohilo asíncrono (`DatabaseManager`).
+- **Aislamiento Funcional:** Las tablas de leaderboard (`bd_leaderboard_battles`, `bd_leaderboard_participation`, `bd_leaderboard_players`) son completamente independientes de `bd_reward_claims`. Ninguna operación de leaderboard altera ni consulta las claves o estados de recompensas.
+
+### 12.3 Esquema Relacional v2 y Migración
+- **`bd_schema_metadata`:** Versión de esquema actualizada a `schema_version = 2`.
+- **Instalación Nueva:** Inicializa directamente todas las tablas de rewards y leaderboard en versión 2.
+- **Migración No Destructiva (v1 → v2):** Detecta versión 1, crea las tablas e índices de leaderboard preservando intactos los registros de `bd_reward_claims`, y asciende la versión a 2.
+- **Rechazo Fail-Safe:** Si se detecta `schema_version > 2`, el inicio se detiene arrojando `IllegalStateException`.
+
+### 12.4 Tablas del Leaderboard
+1. **Historial de Batallas (`bd_leaderboard_battles`):**
+   - `battle_id TEXT PRIMARY KEY`: Identificador único de la batalla.
+   - `completed_at INTEGER NOT NULL`: Timestamp de conclusión en epoch milliseconds.
+   - `world_name TEXT NOT NULL`: Nombre del mundo de combate.
+   - `slayer_uuid TEXT`: UUID del Slayer o NULL.
+   - Índice: `idx_leaderboard_battles_completed` sobre `completed_at DESC`.
+
+2. **Historial de Participación (`bd_leaderboard_participation`):**
+   - `battle_id TEXT NOT NULL`, `player_uuid TEXT NOT NULL`: Clave primaria compuesta `PRIMARY KEY (battle_id, player_uuid)`.
+   - `historical_name TEXT NOT NULL`: Nombre capturado específicamente en dicha batalla (inmutable retroactivamente).
+   - `damage REAL NOT NULL`: Daño exacto infligido.
+   - `first_hit_sequence INTEGER NOT NULL`: Secuencia monotónica de impacto.
+   - `was_slayer INTEGER NOT NULL`: 1 si fue proclamado Slayer (TOP_DAMAGE), 0 en caso contrario.
+   - `participated_at INTEGER NOT NULL`: Epoch ms de la participación.
+   - Índices: `idx_leaderboard_part_player` sobre `player_uuid`, `idx_leaderboard_part_battle` sobre `battle_id`.
+
+3. **Estadísticas Acumuladas por Jugador (`bd_leaderboard_players`):**
+   - `player_uuid TEXT PRIMARY KEY`: Identidad única y permanente del jugador.
+   - `last_known_name TEXT NOT NULL`: Nombre más reciente conocido del jugador.
+   - `battles_participated INTEGER NOT NULL`: Cantidad total de batallas únicas participadas.
+   - `total_damage REAL NOT NULL`: Daño acumulado a lo largo de todas las batallas.
+   - `highest_damage REAL NOT NULL`: Daño máximo registrado en una sola batalla.
+   - `slayer_count INTEGER NOT NULL`: Cantidad total de victorias como Slayer (`was_slayer = true`).
+   - `first_participation_at INTEGER NOT NULL`, `last_participation_at INTEGER NOT NULL`: Tiempos de primera y última batalla.
+   - Índices deterministas:
+     - `idx_leaderboard_players_damage` sobre `(total_damage DESC, player_uuid ASC)`
+     - `idx_leaderboard_players_slayer` sobre `(slayer_count DESC, player_uuid ASC)`
+     - `idx_leaderboard_players_battles` sobre `(battles_participated DESC, player_uuid ASC)`
+
+### 12.5 Idempotencia y Transacciones Atómicas
+- Cada registro de victoria se realiza dentro de una transacción SQLite única (`BEGIN TRANSACTION ... COMMIT` / `ROLLBACK`).
+- La inserción de la batalla utiliza `INSERT INTO bd_leaderboard_battles (...) VALUES (...) ON CONFLICT(battle_id) DO NOTHING;`. Si no se insertan filas (`executeUpdate() == 0`), la transacción se revierte inmediatamente sin tocar participaciones ni agregados.
+- Re-procesar la misma batalla múltiples veces produce exactamente el mismo estado que procesarla una sola vez.
+- La actualización de acumulados en `bd_leaderboard_players` utiliza `INSERT ... ON CONFLICT(player_uuid) DO UPDATE` empleando funciones nativas de SQLite (`MAX(highest_damage, excluded.highest_damage)`, `MIN(first_participation_at, excluded.first_participation_at)`, `+ excluded.total_damage`, `+ 1`).
+- `average_damage` no se persiste en base de datos; se calcula dinámicamente en memoria (`totalDamage / battlesParticipated`).
+
+### 12.6 Consultas y Determinismo de Rankings
+- Las consultas `getTopDamage(limit)`, `getTopSlayers(limit)` y `getTopParticipations(limit)` resuelven empates aplicando siempre `player_uuid ASC` como criterio de desempate determinista.
+- Todas las consultas validan `limit > 0` y aplican un límite máximo de seguridad interna (`MAX_RANKING_LIMIT = 1000`).
+
+### 12.7 Limitaciones de Consistencia
+- No existe un protocolo de dos fases (2PC) entre eventos de Bukkit y SQLite. La garantía formal es: *una vez confirmada la transacción en SQLite, ningún reintento o re-procesamiento del mismo `battle_id` duplicará contadores o estadísticas acumuladas*.

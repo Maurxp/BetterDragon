@@ -21,9 +21,9 @@
 - **Fase 3.5–3.5-R1:** Combat Phases & Abilities (Fases Ordenadas, Monotonicidad, AbilityEngine) `[DONE]`
 - **Fase 3.6–3.6-R1:** Arena, Reglas y Límites (Geometría AABB, arenas.yml, Snapshot Inmutable, 0% NMS) `[DONE]`
 - **Fase 3.7–3.7-R1:** Muerte, Victoria y BattleResult (Idempotencia, Supresión XP/Drops, Encapsulación Evento) `[DONE]`
-- **Fase 3.8–3.8-R2:** Recompensas y Claims (Elegibilidad por daño real, Redistribución Proporcional, Redondeo Determinista, Identidad por `rewardId`, Idempotencia Canónica `battleId:participantId:rewardId`, Validación Estricta de Amount y Material Paper nativo, Safe Defaults neutrales y Claims en memoria) `[DONE]`
-- **Fase 3.9:** Persistencia / Claims Durables (SQLite Durable Storage, Single-Writer Async Worker, Schema Versioning v1, Restart Recovery, Crash Consistency Limitation) `[DONE]`
-- **Próxima Fase:** Fase 3.10 — Sistema de Leaderboard `[TODO]`
+- **Fase 3.9–3.9-R2:** Persistencia / Claims Durables (SQLite Durable Storage, Single-Writer Async Worker, Schema Versioning v1, Restart Recovery, Crash Consistency Limitation, Protección Terminal CLAIMED) `[DONE]`
+- **Fase 3.10:** Leaderboard Persistente (SQLite schema v2, migración no destructiva v1 → v2, historial de batallas y participación, estadísticas acumuladas por UUID, Top Damage, Top Slayers, Top Participations con desempate determinista, transacciones atómicas, idempotencia estricta, integración con BattleResult, persistencia async sin bloqueo del hilo principal) `[DONE]`
+- **Próxima Fase:** Fase 3.11 — Commands / Admin UX `[TODO]`
 
 ---
 

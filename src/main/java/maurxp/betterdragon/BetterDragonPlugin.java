@@ -39,6 +39,10 @@ import maurxp.betterdragon.phase.PhaseRuntime;
 import maurxp.betterdragon.platform.bossbar.BossBarWorldListener;
 import maurxp.betterdragon.platform.bossbar.VanillaBossBarController;
 import maurxp.betterdragon.platform.bossbar.VanillaBossBarControllerFactory;
+import maurxp.betterdragon.leaderboard.service.DragonLeaderboardListener;
+import maurxp.betterdragon.leaderboard.service.LeaderboardService;
+import maurxp.betterdragon.leaderboard.storage.LeaderboardStorage;
+import maurxp.betterdragon.leaderboard.storage.SQLiteLeaderboardStorage;
 import maurxp.betterdragon.persistence.DatabaseManager;
 import maurxp.betterdragon.persistence.SchemaInitializer;
 import maurxp.betterdragon.reward.allocation.RewardAllocationEngine;
@@ -101,6 +105,8 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
     private DatabaseManager databaseManager;
     private ClaimStorage claimStorage;
     private RewardService rewardService;
+    private LeaderboardStorage leaderboardStorage;
+    private LeaderboardService leaderboardService;
 
     @Override
     public void onEnable() {
@@ -182,9 +188,15 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
             DragonRewardListener rewardListener = new DragonRewardListener(rewardService, getLogger());
             getServer().getPluginManager().registerEvents(rewardListener, this);
 
+            // 9. Inicializar subsistema de Leaderboard Persistente (Fase 3.10)
+            this.leaderboardStorage = new SQLiteLeaderboardStorage(databaseManager, getLogger());
+            this.leaderboardService = new LeaderboardService(leaderboardStorage, getLogger());
+            DragonLeaderboardListener leaderboardListener = new DragonLeaderboardListener(leaderboardService, getLogger());
+            getServer().getPluginManager().registerEvents(leaderboardListener, this);
+
             getServer().getPluginManager().registerEvents(this, this);
 
-            // 9. Tarea periódica de evaluación de fases y habilidades (Hilo principal)
+            // 10. Tarea periódica de evaluación de fases y habilidades (Hilo principal)
             getServer().getScheduler().runTaskTimer(this, () -> {
                 long currentTick = Bukkit.getCurrentTick();
                 for (BattleSession session : sessionManager.getAllSessions().values()) {
@@ -220,7 +232,14 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
                     + " sesiones y dragones activos para recuperación futura.");
         }
 
-        // Cierre ordenado de persistencia durable (Fase 3.9)
+        // Cierre ordenado de persistencia durable (Fase 3.9 / 3.10)
+        if (leaderboardService != null) {
+            try {
+                leaderboardService.close();
+            } catch (Exception e) {
+                getLogger().log(Level.WARNING, "[BetterDragon] Error al cerrar LeaderboardService: " + e.getMessage(), e);
+            }
+        }
         if (claimStorage != null) {
             try {
                 claimStorage.close();
@@ -320,6 +339,14 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
 
     public RewardService getRewardService() {
         return rewardService;
+    }
+
+    public LeaderboardStorage getLeaderboardStorage() {
+        return leaderboardStorage;
+    }
+
+    public LeaderboardService getLeaderboardService() {
+        return leaderboardService;
     }
 
     /**

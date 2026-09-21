@@ -100,7 +100,7 @@ class SQLiteClaimStorageTest {
             try (Statement stmt = conn.createStatement();
                  ResultSet rs = stmt.executeQuery("SELECT value FROM bd_schema_metadata WHERE key = 'schema_version'")) {
                 assertTrue(rs.next(), "Debe existir registro en bd_schema_metadata");
-                assertEquals("1", rs.getString("value"), "La versión de schema debe ser 1");
+                assertEquals(String.valueOf(SchemaInitializer.CURRENT_SCHEMA_VERSION), rs.getString("value"), "La versión de schema debe ser la actual");
             }
 
             // Verificar existencia de tabla bd_reward_claims

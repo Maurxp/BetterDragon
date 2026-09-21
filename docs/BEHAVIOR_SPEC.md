@@ -17,7 +17,7 @@ BetterDragon es un plugin para Paper que toma la **soberanía exclusiva del cicl
 - **Respawn tras Downtime:** El sistema entra en `ARMED_WAITING_PLAYER` y espera a que un jugador ingrese a la dimensión del End antes de invocar al dragón.
 - **Portal Central (`portal.enabled`):** Si `portal.enabled: false`, BetterDragon **no crea, no modifica, no restaura y no administra** el portal de salida de bedrock vanilla.
 - **BossBar Vanilla:** Neutralizada de forma determinista mediante el adaptador NMS aislado (`VanillaBossBarController`). El método `restoreVanillaBossBar()` fue eliminado permanentemente.
-- **Leaderboard:** Incluido en el MVP, consultable mediante comandos y respaldado por SQLite.
+- **Leaderboard:** Incluido en el MVP y respaldado por SQLite. La interfaz de consulta mediante comandos queda reservada para la Fase 3.11.
 - **Estatuas / NPCs:** Fuera del alcance del MVP.
 - **Comandos:** `/betterdragon` (canónico) y `/bd` (alias oficial).
 - **Core 0% NMS:** Sin dependencias de internals de Minecraft fuera de `platform.bossbar`.
@@ -221,6 +221,45 @@ La batalla opera como una Máquina de Estados Finitos (FSM) confinada al hilo pr
     - Al ingresar un jugador (`PlayerJoinEvent`), `DragonRewardListener` solicita asíncronamente sus reclamos pendientes y transfiere la entrega física al hilo principal mediante `MainThreadDispatcher`, actualizando el estado resultante en SQLite.
   - **Limitación Documentada de Consistencia ante Caídas:** BetterDragon no afirma falsas garantías transaccionales "exactly-once" coordinadas entre SQLite y el guardado de inventarios NBT de Minecraft. La política es *at-least-once con deduplicación optimista*: nunca se marca un claim como `CLAIMED` antes de confirmar la entrega en memoria en el hilo principal.
   - **Prohibición de Fallback Silencioso:** Si SQLite falla al inicializarse, el plugin no degrada silenciosamente a `InMemoryClaimStorage` fingiendo durabilidad; reporta el error y bloquea el procesamiento persistente para evitar pérdidas silenciosas.
-  - **Comandos de Usuario:** Sin comandos `/bd claim` ni `/bd rewards` en esta fase (congelados para la Fase 3.11 de Framework de Comandos & GUI).
+  - **Comandos de Usuario:** Sin comandos `/bd claim` ni `/bd rewards` en esta fase (congelados para la Fase 3.11 — Commands / Admin UX).
 - **Recuperación tras Reinicio:**
   - Dragones con PDC detectados durante el arranque sin batalla activa en memoria son removidos de forma limpia para evitar entidades huérfanas. `[CONSOLIDADO EN 3.3-R1]`
+
+---
+
+## 8. Leaderboard Persistente e Idempotente (Fase 3.10) `[COMPLETADA]`
+
+- **Consumo Exclusivo de `BattleResult`:**
+  - El leaderboard se activa ante `BetterDragonVictoryEvent` consumiendo el `BattleResult` inmutable ya producido.
+  - Cero consultas a entidades Bukkit vivas (`Player`, `EnderDragon`), `DragonBattle` o `EndDragonFight`.
+- **Identidad Inmutable por UUID:**
+  - La clave de identidad del jugador es exclusivamente su `UUID`.
+  - Los nombres de jugador nunca son claves primarias ni identificadores lógicos. Un jugador que cambia de nombre sigue siendo el mismo registro.
+- **Separación de Nombres (`historicalName` vs `lastKnownName`):**
+  - `historical_name`: Almacenado en `bd_leaderboard_participation` para auditar el nombre que portaba el jugador durante esa batalla específica. Es inmutable y no se sobrescribe jamás retroactivamente.
+  - `last_known_name`: Almacenado y actualizado en `bd_leaderboard_players` reflejando el nombre más reciente conocido.
+- **Respeto Estricto de Slayer (`TOP_DAMAGE`):**
+  - El Slayer es exactamente el `slayerUniqueId` resuelto en `BattleResult`.
+  - Si el jugador fue Slayer en la batalla (`was_slayer = true`), su contador acumulado `slayer_count` se incrementa en 1; de lo contrario no se incrementa.
+- **Transacciones Atómicas e Idempotencia:**
+  - Cada batalla se registra dentro de una transacción SQLite única (`BEGIN TRANSACTION` -> `bd_leaderboard_battles` -> `bd_leaderboard_participation` -> `bd_leaderboard_players` -> `COMMIT`).
+  - Idempotencia estricta por `ON CONFLICT(battle_id) DO NOTHING`. Si la batalla ya fue procesada, la transacción revierte y no altera ninguna estadística.
+  - Re-procesar la misma batalla $N$ veces no incrementa contadores, daño ni participaciones.
+- **Agregados Acumulados y `averageDamage` Derivado:**
+  - `battles_participated`: Cantidad de participaciones únicas en batallas ganadas.
+  - `total_damage`: Suma de daño de todas las batallas.
+  - `highest_damage`: $\max(\text{daño de cada batalla})$.
+  - `slayer_count`: Victorias como Slayer.
+  - `first_participation_at` / `last_participation_at`: Epoch milliseconds de la primera y última participación.
+  - `average_damage`: Calculado bajo demanda en memoria (`totalDamage / battlesParticipated`). No se almacena en base de datos.
+- **Consultas Deterministas y Límites:**
+  - `getTopDamage(limit)`: Ordenado por `total_damage DESC, player_uuid ASC`.
+  - `getTopSlayers(limit)`: Ordenado por `slayer_count DESC, player_uuid ASC`.
+  - `getTopParticipations(limit)`: Ordenado por `battles_participated DESC, player_uuid ASC`.
+  - Desempate determinista siempre por `player_uuid ASC`.
+  - Validación de `limit > 0` con límite interno máximo de 1000.
+- **Aislamiento de Persistencia:**
+  - Convivencia en `betterdragon.db` con `schema_version = 2` y migración no destructiva desde v1.
+  - `bd_reward_claims` permanece intacta e independiente.
+- **Sin Bloqueo del Hilo Principal:**
+  - Todas las operaciones de lectura y escritura se ejecutan de manera asíncrona mediante `CompletableFuture` en el worker de `DatabaseManager`.
