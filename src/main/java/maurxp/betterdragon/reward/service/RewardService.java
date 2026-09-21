@@ -14,6 +14,8 @@ import maurxp.betterdragon.reward.model.RewardAllocationPlan;
 
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -22,7 +24,7 @@ import java.util.logging.Logger;
  * Coordina el ciclo completo tras la victoria:
  * <ol>
  *   <li>Resolución de snapshot inmutable de configuración de recompensas.</li>
- *   <li>Cálculo puro de elegibilidad y reparto proporcional (AllocationEngine).</li>
+ *   <li>Cálculo puro y determinista de elegibilidad y reparto proporcional (AllocationEngine).</li>
  *   <li>Entrega segura, idempotente y con tolerancia a desconexión/inventario lleno (RewardDeliveryService).</li>
  *   <li>Emisión desacoplada de {@link BetterDragonRewardEvent}.</li>
  * </ol>
@@ -91,27 +93,33 @@ public class RewardService {
             return plan;
         }
 
-        // 3. Entrega física e idempotente (protegiendo remanentes en ClaimStorage)
-        RewardDeliveryService.DeliveryBatchResult deliveryResult = deliveryService.deliverPlan(plan);
-        logger.info("[BetterDragon] Recompensas procesadas para batalla " + battleId + ": "
-                + deliveryResult.fullyDeliveredCount() + " completadas, "
-                + deliveryResult.pendingCount() + " pendientes de reclamo, "
-                + deliveryResult.totalItemsDelivered() + " ítems entregados.");
+        // 3. Entrega física e idempotente (protegiendo remanentes en ClaimStorage) de forma no bloqueante
+        deliveryService.deliverPlan(plan).whenComplete((deliveryResult, error) -> {
+            if (error != null) {
+                logger.log(Level.SEVERE, "[BetterDragon] Error durante la entrega de recompensas para batalla "
+                        + battleId + ": " + error.getMessage(), error);
+            } else {
+                logger.info("[BetterDragon] Recompensas procesadas para batalla " + battleId + ": "
+                        + deliveryResult.fullyDeliveredCount() + " completadas, "
+                        + deliveryResult.pendingCount() + " pendientes de reclamo, "
+                        + deliveryResult.totalItemsDelivered() + " ítems entregados.");
 
-        // 4. Despacho del evento informativo de dominio
-        BetterDragonRewardEvent event = new BetterDragonRewardEvent(battleId, plan, deliveryResult);
-        rewardEventDispatcher.dispatch(event);
+                // 4. Despacho del evento informativo de dominio
+                BetterDragonRewardEvent event = new BetterDragonRewardEvent(battleId, plan, deliveryResult);
+                rewardEventDispatcher.dispatch(event);
+            }
+        });
 
         return plan;
     }
 
     /**
-     * Reintenta la entrega de cualquier reclamo pendiente para el jugador especificado.
+     * Reintenta de forma asíncrona la entrega de cualquier reclamo pendiente para el jugador especificado.
      *
      * @param playerId UUID del jugador
-     * @return total de ítems efectivamente entregados
+     * @return CompletableFuture con el total de ítems efectivamente entregados
      */
-    public int retryPendingClaims(UUID playerId) {
+    public CompletableFuture<Integer> retryPendingClaims(UUID playerId) {
         return deliveryService.retryPendingForPlayer(playerId);
     }
 

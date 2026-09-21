@@ -110,7 +110,7 @@ class RewardIdempotencyTest {
         assertNotEquals(allocA.idempotencyKey(), allocB.idempotencyKey(), "Idempotency keys deben ser distintas para IDs distintos");
 
         RewardAllocationPlan plan = new RewardAllocationPlan(battleId, List.of(allocA, allocB), Instant.now());
-        DeliveryBatchResult result = deliveryService.deliverPlan(plan);
+        DeliveryBatchResult result = deliveryService.deliverPlan(plan).join();
 
         // 2 asignaciones completamente entregadas, 15 diamantes en total
         assertEquals(2, result.fullyDeliveredCount());
@@ -118,14 +118,14 @@ class RewardIdempotencyTest {
         assertEquals(15, inventoryAdapter.getTotalReceived(playerId, "DIAMOND"));
 
         // Dos claims independientes y distintos registrados en almacenamiento
-        List<RewardClaim> storedClaims = claimStorage.findByPlayer(playerId);
+        List<RewardClaim> storedClaims = claimStorage.findByPlayer(playerId).join();
         assertEquals(2, storedClaims.size(), "Deben coexistir exactamente 2 claims distintos sin colisión");
 
-        RewardClaim claimA = claimStorage.findByIdempotencyKey(allocA.idempotencyKey()).orElseThrow();
+        RewardClaim claimA = claimStorage.findByIdempotencyKey(allocA.idempotencyKey()).join().orElseThrow();
         assertEquals(5, claimA.deliveredAmount());
         assertEquals(ClaimStatus.CLAIMED, claimA.status());
 
-        RewardClaim claimB = claimStorage.findByIdempotencyKey(allocB.idempotencyKey()).orElseThrow();
+        RewardClaim claimB = claimStorage.findByIdempotencyKey(allocB.idempotencyKey()).join().orElseThrow();
         assertEquals(10, claimB.deliveredAmount());
         assertEquals(ClaimStatus.CLAIMED, claimB.status());
     }
@@ -149,20 +149,20 @@ class RewardIdempotencyTest {
         RewardAllocationPlan plan = new RewardAllocationPlan(battleId, List.of(alloc), Instant.now());
 
         // Primera entrega
-        var firstResult = deliveryService.deliverPlan(plan);
+        var firstResult = deliveryService.deliverPlan(plan).join();
         assertEquals(1, firstResult.fullyDeliveredCount());
         assertEquals(64, firstResult.totalItemsDelivered());
         assertEquals(64, inventoryAdapter.getTotalReceived(playerId, "DIAMOND"));
 
         // Segunda entrega idéntica (ej. reintento tras re-procesamiento)
-        var secondResult = deliveryService.deliverPlan(plan);
+        var secondResult = deliveryService.deliverPlan(plan).join();
         assertEquals(1, secondResult.fullyDeliveredCount());
         assertEquals(0, secondResult.totalItemsDelivered(), "No debe entregar ítems adicionales");
         assertEquals(64, inventoryAdapter.getTotalReceived(playerId, "DIAMOND"), "El jugador debe seguir teniendo exactamente 64");
 
         // En almacenamiento solo existe un reclamo
-        assertEquals(1, claimStorage.count());
-        assertEquals(ClaimStatus.CLAIMED, claimStorage.findByIdempotencyKey(alloc.idempotencyKey()).orElseThrow().status());
+        assertEquals(1, claimStorage.count().join());
+        assertEquals(ClaimStatus.CLAIMED, claimStorage.findByIdempotencyKey(alloc.idempotencyKey()).join().orElseThrow().status());
     }
 
     @Test
@@ -226,7 +226,7 @@ class RewardIdempotencyTest {
         assertEquals(10, diamondsAfterFirst, "Debe haber recibido los 10 diamantes configurados en la sesión");
         assertEquals(1, emittedEvents.size());
 
-        int storedClaimsFirst = claimStorage.count();
+        int storedClaimsFirst = claimStorage.count().join();
 
         // 2. Segundo procesamiento idéntico (simula doble listener o doble invocación)
         RewardAllocationPlan plan2 = rewardService.processVictory(victoryResult);
@@ -234,7 +234,7 @@ class RewardIdempotencyTest {
         int diamondsAfterSecond = inventoryAdapter.getTotalReceived(p1, "DIAMOND");
 
         assertEquals(diamondsAfterFirst, diamondsAfterSecond, "La cantidad física de ítems entregados no debe cambiar");
-        assertEquals(storedClaimsFirst, claimStorage.count(), "No deben crearse reclamos duplicados en ClaimStorage");
+        assertEquals(storedClaimsFirst, claimStorage.count().join(), "No deben crearse reclamos duplicados en ClaimStorage");
         assertEquals(2, emittedEvents.size(), "El evento informativo se emite, pero la entrega física es 100% idempotente");
     }
 

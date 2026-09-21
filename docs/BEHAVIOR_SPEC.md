@@ -205,8 +205,22 @@ La batalla opera como una Máquina de Estados Finitos (FSM) confinada al hilo pr
   - **Slayer (`TOP_DAMAGE`):** Recompensa adicional configurable adjudicada al Slayer resuelto en `BattleResult`, evaluando la compuerta `requires_eligibility`.
   - **Buzón de Reclamos y Cero Pérdidas:** Si el jugador está desconectado o su inventario saturado, las unidades no entregadas quedan resguardadas en `ClaimStorage` en estado `PENDING`. Al reconectarse o liberar ranuras, se entregan automáticamente.
   - **Idempotencia Estricta y Prevención de Colisiones:** Deduplicación determinista por clave canónica `battleId:participantId:rewardId`. Distintas definiciones con el mismo material no colisionan, permitiendo la coexistencia de reclamos independientes. Reintentos, doble procesamiento y reconexiones nunca duplican ítems físicos. Toda documentación y Javadoc fue saneado para erradicar referencias obsoletas a `source:material`.
-  - **Límites de Almacenamiento en Memoria:** `InMemoryClaimStorage` es un resguardo volátil en memoria del proceso. Los reclamos no sobreviven a reinicios ni detenciones del servidor.
-- **Persistencia SQLite (Fase 3.9) `[PENDIENTE]`:**
-  - Migración del buzón de claims y registro histórico de batallas a SQLite mediante un worker asíncrono de escritor único (*Single-Writer Async Worker*), recuperación de claims pendientes al inicio del servidor y comando `/bd claim`. `[PENDIENTE FASE 3.9]`
+- **Persistencia SQLite y Buzón de Reclamos Durables (Fase 3.9) `[COMPLETADA]`:**
+  - **Almacenamiento Durable Embebido:** Migración del almacenamiento de claims a base de datos relacional SQLite (`plugins/BetterDragon/data/betterdragon.db`).
+  - **Driver Empaquetado:** Dependencia `org.xerial:sqlite-jdbc:3.44.1.0` sombreada (*shaded*) en el JAR final con binarios nativos para todas las plataformas sin asumir provisión externa de Paper.
+  - **Topología No Bloqueante (Single-Writer Async):** Toda interacción JDBC (`SELECT`, `INSERT`, `UPDATE`, checkpoint) se ejecuta fuera del hilo principal en un ejecutor dedicado secuencial (`PersistenceExecutor`). Cero llamadas de base de datos bloquean los 20 TPS de Bukkit.
+  - **Esquema Relacional Inicial y Versionado (v1):** Creación e inicialización DDL idempotente con tabla de metadatos `bd_schema_metadata` registrando `schema_version = 1`.
+  - **Rechazo Fail-Safe de Versiones Futuras:** Si la base de datos registra una versión mayor a la soportada por el plugin (`schema_version > 1`), el subsistema arroja `IllegalStateException` y se detiene inmediatamente sin realizar modificaciones destructivas.
+  - **Idempotencia Relacional Estricta:** Restricción `UNIQUE(idempotency_key)` sobre `battleId:participantId:rewardId` y mutaciones atómicas `INSERT INTO bd_reward_claims ... ON CONFLICT(idempotency_key) DO UPDATE SET ...`.
+  - **Ciclo de Vida Durable de Reclamos:**
+    - `PENDING`: Sobrevive reinicios del servidor. Se crea cuando un jugador está desconectado o con inventario saturado, registrando `remaining_amount`.
+    - `CLAIMED`: Recompensa físicamente entregada en su totalidad (`remaining_amount = 0`). No vuelve a entregarse tras reiniciar, pero permanece almacenada para auditoría e idempotencia.
+    - `FAILED_RETRYABLE`: Preserva el reclamo con su motivo de error ante fallos temporales de entrega, disponible para reintento.
+  - **Recuperación tras Reinicio y Reconexión:**
+    - Los claims pendientes no se entregan a jugadores offline en el arranque.
+    - Al ingresar un jugador (`PlayerJoinEvent`), `DragonRewardListener` solicita asíncronamente sus reclamos pendientes y transfiere la entrega física al hilo principal mediante `MainThreadDispatcher`, actualizando el estado resultante en SQLite.
+  - **Limitación Documentada de Consistencia ante Caídas:** BetterDragon no afirma falsas garantías transaccionales "exactly-once" coordinadas entre SQLite y el guardado de inventarios NBT de Minecraft. La política es *at-least-once con deduplicación optimista*: nunca se marca un claim como `CLAIMED` antes de confirmar la entrega en memoria en el hilo principal.
+  - **Prohibición de Fallback Silencioso:** Si SQLite falla al inicializarse, el plugin no degrada silenciosamente a `InMemoryClaimStorage` fingiendo durabilidad; reporta el error y bloquea el procesamiento persistente para evitar pérdidas silenciosas.
+  - **Comandos de Usuario:** Sin comandos `/bd claim` ni `/bd rewards` en esta fase (congelados para la Fase 3.11 de Framework de Comandos & GUI).
 - **Recuperación tras Reinicio:**
   - Dragones con PDC detectados durante el arranque sin batalla activa en memoria son removidos de forma limpia para evitar entidades huérfanas. `[CONSOLIDADO EN 3.3-R1]`

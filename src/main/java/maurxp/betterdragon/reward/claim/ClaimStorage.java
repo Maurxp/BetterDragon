@@ -8,89 +8,119 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 /**
- * Abstracción de almacenamiento para reclamos de recompensas.
+ * Abstracción de almacenamiento asíncrono para reclamos de recompensas.
  * <p>
  * Proporciona un límite arquitectónico desacoplado para persistir y consultar
- * el estado de recompensas adjudicadas, permitiendo implementaciones
- * en memoria (Fase 3.8) o en base de datos SQLite persistente (Fase 3.9).
+ * el estado de recompensas adjudicadas sin bloquear el hilo principal de Bukkit,
+ * permitiendo implementaciones en memoria (pruebas unitarias) o en SQLite duradero (producción).
  *
  * @author maurxp
  */
-public interface ClaimStorage {
+public interface ClaimStorage extends AutoCloseable {
 
     /**
-     * Guarda o actualiza un reclamo en el almacenamiento.
+     * Crea un reclamo de forma atómica únicamente si no existe previamente por su clave de idempotencia.
+     * <p>
+     * Si el reclamo ya existía (por ejemplo, en estado {@code CLAIMED}, {@code PENDING} o {@code FAILED_RETRYABLE}),
+     * la operación NO lo sobrescribe y retorna la instancia actualmente persistida intacta.
+     *
+     * @param claim reclamo a insertar si está ausente
+     * @return CompletableFuture con el reclamo almacenado (nuevo o preexistente)
+     */
+    CompletableFuture<RewardClaim> createIfAbsent(RewardClaim claim);
+
+    /**
+     * Actualiza un reclamo existente de forma explícita y protegida.
+     * <p>
+     * <b>Garantía de Integridad:</b> Un reclamo que ya se encuentra en estado {@code CLAIMED}
+     * nunca puede ser degradado a {@code PENDING} ni sobrescrito por un estado anterior.
+     *
+     * @param claim reclamo con los datos a actualizar
+     * @return CompletableFuture con {@code true} si se actualizó una fila existente, o {@code false} si no existía o fue protegido
+     */
+    CompletableFuture<Boolean> updateExisting(RewardClaim claim);
+
+    /**
+     * Guarda o actualiza un reclamo en el almacenamiento de forma asíncrona.
      *
      * @param claim reclamo a almacenar
+     * @return CompletableFuture completado al persistir
      */
-    void save(RewardClaim claim);
+    CompletableFuture<Void> save(RewardClaim claim);
 
     /**
-     * Guarda o actualiza múltiples reclamos en una operación en lote.
+     * Guarda o actualiza múltiples reclamos en una operación en lote de forma asíncrona.
      *
      * @param claims colección de reclamos
+     * @return CompletableFuture completado al persistir el lote
      */
-    void saveAll(Collection<RewardClaim> claims);
+    CompletableFuture<Void> saveAll(Collection<RewardClaim> claims);
 
     /**
-     * Busca un reclamo por su identificador único.
+     * Busca un reclamo por su identificador único de forma asíncrona.
      *
      * @param claimId UUID del reclamo
-     * @return Optional con el reclamo si existe
+     * @return CompletableFuture con Optional del reclamo si existe
      */
-    Optional<RewardClaim> findById(UUID claimId);
+    CompletableFuture<Optional<RewardClaim>> findById(UUID claimId);
 
     /**
-     * Busca un reclamo por su clave de idempotencia única.
+     * Busca un reclamo por su clave de idempotencia única (battleId:participantId:rewardId) de forma asíncrona.
      *
-     * @param idempotencyKey clave única (battleId:participantId:rewardId)
-     * @return Optional con el reclamo si existe
+     * @param idempotencyKey clave única de deduplicación
+     * @return CompletableFuture con Optional del reclamo si existe
      */
-    Optional<RewardClaim> findByIdempotencyKey(String idempotencyKey);
+    CompletableFuture<Optional<RewardClaim>> findByIdempotencyKey(String idempotencyKey);
 
     /**
-     * Obtiene todos los reclamos asociados a un jugador.
-     *
-     * @param playerId UUID del jugador
-     * @return lista inmutable de reclamos del jugador
-     */
-    List<RewardClaim> findByPlayer(UUID playerId);
-
-    /**
-     * Obtiene los reclamos pendientes de entrega o reintentables para un jugador.
+     * Obtiene todos los reclamos asociados a un jugador de forma asíncrona.
      *
      * @param playerId UUID del jugador
-     * @return lista inmutable de reclamos en estado PENDING o FAILED_RETRYABLE
+     * @return CompletableFuture con la lista inmutable de reclamos del jugador
      */
-    List<RewardClaim> findPendingByPlayer(UUID playerId);
+    CompletableFuture<List<RewardClaim>> findByPlayer(UUID playerId);
 
     /**
-     * Obtiene todos los reclamos asociados a una batalla.
+     * Obtiene los reclamos pendientes de entrega o reintentables para un jugador de forma asíncrona.
+     *
+     * @param playerId UUID del jugador
+     * @return CompletableFuture con la lista inmutable de reclamos en estado PENDING o FAILED_RETRYABLE
+     */
+    CompletableFuture<List<RewardClaim>> findPendingByPlayer(UUID playerId);
+
+    /**
+     * Obtiene todos los reclamos asociados a una batalla de forma asíncrona.
      *
      * @param battleId ID de la batalla
-     * @return lista inmutable de reclamos de la batalla
+     * @return CompletableFuture con la lista inmutable de reclamos de la batalla
      */
-    List<RewardClaim> findByBattleId(BattleId battleId);
+    CompletableFuture<List<RewardClaim>> findByBattleId(BattleId battleId);
 
     /**
-     * Obtiene todos los reclamos que coincidan con el estado solicitado.
+     * Obtiene todos los reclamos que coincidan con el estado solicitado de forma asíncrona.
      *
      * @param status estado de reclamo
-     * @return lista inmutable de reclamos con dicho estado
+     * @return CompletableFuture con la lista inmutable de reclamos con dicho estado
      */
-    List<RewardClaim> findByStatus(ClaimStatus status);
+    CompletableFuture<List<RewardClaim>> findByStatus(ClaimStatus status);
 
     /**
-     * Retorna la cantidad total de reclamos almacenados.
+     * Retorna la cantidad total de reclamos almacenados de forma asíncrona.
      *
-     * @return conteo total
+     * @return CompletableFuture con el conteo total
      */
-    int count();
+    CompletableFuture<Integer> count();
 
     /**
-     * Limpia todos los reclamos almacenados.
+     * Limpia todos los reclamos almacenados de forma asíncrona.
+     *
+     * @return CompletableFuture completado al limpiar
      */
-    void clear();
+    CompletableFuture<Void> clear();
+
+    @Override
+    default void close() {}
 }

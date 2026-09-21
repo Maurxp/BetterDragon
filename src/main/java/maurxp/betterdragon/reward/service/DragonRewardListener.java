@@ -18,8 +18,8 @@ import java.util.logging.Logger;
  * Principios:
  * <ul>
  *   <li><b>Prioridad MONITOR:</b> No interfiere ni cancela eventos físicos; actúa como observador.</li>
- *   <li><b>Entrega en Reconexión:</b> Si un jugador estaba desconectado al terminar la batalla,
- *       reintenta automáticamente la entrega de sus ítems pendientes al ingresar al servidor.</li>
+ *   <li><b>No Bloqueante:</b> La consulta de reclamos en base de datos al ingresar el jugador se ejecuta
+ *       asíncronamente, sin congelar el hilo principal de Bukkit.</li>
  *   <li><b>Idempotencia:</b> Los reintentos nunca duplican ítems previamente entregados.</li>
  * </ul>
  *
@@ -56,15 +56,20 @@ public class DragonRewardListener implements Listener {
         }
 
         UUID playerId = event.getPlayer().getUniqueId();
+        String playerName = event.getPlayer().getName();
         try {
-            int retriedItems = rewardService.retryPendingClaims(playerId);
-            if (retriedItems > 0) {
-                logger.info("[BetterDragon] Se entregaron " + retriedItems + " ítems pendientes a "
-                        + event.getPlayer().getName() + " al iniciar sesión.");
-            }
+            rewardService.retryPendingClaims(playerId).whenComplete((retriedItems, ex) -> {
+                if (ex != null) {
+                    logger.log(Level.WARNING, "[BetterDragon] Error al reintentar recompensas pendientes para "
+                            + playerName + ": " + ex.getMessage(), ex);
+                } else if (retriedItems != null && retriedItems > 0) {
+                    logger.info("[BetterDragon] Se entregaron " + retriedItems + " ítems pendientes a "
+                            + playerName + " al iniciar sesión.");
+                }
+            });
         } catch (Exception ex) {
-            logger.log(Level.WARNING, "[BetterDragon] Error al reintentar recompensas pendientes para "
-                    + event.getPlayer().getName() + ": " + ex.getMessage(), ex);
+            logger.log(Level.WARNING, "[BetterDragon] Error al despachar reintento de recompensas pendientes para "
+                    + playerName + ": " + ex.getMessage(), ex);
         }
     }
 }

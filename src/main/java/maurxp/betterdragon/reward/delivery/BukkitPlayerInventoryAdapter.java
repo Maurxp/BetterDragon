@@ -49,7 +49,7 @@ public class BukkitPlayerInventoryAdapter implements PlayerInventoryAdapter {
         }
 
         Material material = Material.matchMaterial(item.material());
-        if (material == null || material.isAir()) {
+        if (material == null || material == Material.AIR || material.name().endsWith("AIR")) {
             logger.warning("[BetterDragon] No se pudo encontrar el material para la recompensa: " + item.material());
             return 0;
         }

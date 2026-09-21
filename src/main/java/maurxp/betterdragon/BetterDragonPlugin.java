@@ -39,9 +39,12 @@ import maurxp.betterdragon.phase.PhaseRuntime;
 import maurxp.betterdragon.platform.bossbar.BossBarWorldListener;
 import maurxp.betterdragon.platform.bossbar.VanillaBossBarController;
 import maurxp.betterdragon.platform.bossbar.VanillaBossBarControllerFactory;
+import maurxp.betterdragon.persistence.DatabaseManager;
+import maurxp.betterdragon.persistence.SchemaInitializer;
 import maurxp.betterdragon.reward.allocation.RewardAllocationEngine;
 import maurxp.betterdragon.reward.claim.ClaimStorage;
 import maurxp.betterdragon.reward.claim.InMemoryClaimStorage;
+import maurxp.betterdragon.reward.claim.SQLiteClaimStorage;
 import maurxp.betterdragon.reward.delivery.BukkitPlayerInventoryAdapter;
 import maurxp.betterdragon.reward.delivery.PlayerInventoryAdapter;
 import maurxp.betterdragon.reward.delivery.RewardDeliveryService;
@@ -53,6 +56,7 @@ import maurxp.betterdragon.reward.model.RewardClaim;
 import maurxp.betterdragon.reward.service.DragonRewardListener;
 import maurxp.betterdragon.reward.service.RewardService;
 import maurxp.betterdragon.util.BetterDragonKeys;
+import maurxp.betterdragon.util.MainThreadDispatcher;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -94,6 +98,7 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
     private BattleSessionManager sessionManager;
     private DragonSpawner dragonSpawner;
     private BattleManager battleManager;
+    private DatabaseManager databaseManager;
     private ClaimStorage claimStorage;
     private RewardService rewardService;
 
@@ -148,11 +153,22 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
             DragonCombatListener combatListener = new DragonCombatListener(sessionManager, getLogger());
             getServer().getPluginManager().registerEvents(combatListener, this);
 
-            // 8. Inicializar subsistema de Recompensas (Fase 3.8)
-            this.claimStorage = new InMemoryClaimStorage();
+            // 8. Inicializar subsistema de Recompensas y Persistencia Durable (Fase 3.9 / 3.9-R1)
+            this.databaseManager = DatabaseManager.forPluginDataFolder(getDataFolder(), getLogger());
+            this.databaseManager.initializeAsync().whenComplete((v, ex) -> {
+                if (ex != null) {
+                    getLogger().log(Level.SEVERE, "[BetterDragon] Error fatal al inicializar base de datos SQLite asíncrona: "
+                            + ex.getMessage(), ex);
+                } else {
+                    getLogger().info("[BetterDragon] Persistencia SQLite inicializada y lista para operaciones.");
+                }
+            });
+
+            this.claimStorage = new SQLiteClaimStorage(databaseManager, getLogger());
             RewardAllocationEngine allocationEngine = new RewardAllocationEngine();
             PlayerInventoryAdapter inventoryAdapter = new BukkitPlayerInventoryAdapter(getLogger());
-            RewardDeliveryService deliveryService = new RewardDeliveryService(inventoryAdapter, claimStorage, getLogger());
+            MainThreadDispatcher mainThreadDispatcher = runnable -> getServer().getScheduler().runTask(this, runnable);
+            RewardDeliveryService deliveryService = new RewardDeliveryService(inventoryAdapter, claimStorage, mainThreadDispatcher, getLogger());
             RewardEventDispatcher rewardEventDispatcher = event -> getServer().getPluginManager().callEvent(event);
             this.rewardService = new RewardService(
                     sessionManager,
@@ -202,6 +218,22 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
         if (sessionManager != null && sessionManager.getSessionCount() > 0) {
             getLogger().info("[BetterDragon] Preservando " + sessionManager.getSessionCount()
                     + " sesiones y dragones activos para recuperación futura.");
+        }
+
+        // Cierre ordenado de persistencia durable (Fase 3.9)
+        if (claimStorage != null) {
+            try {
+                claimStorage.close();
+            } catch (Exception e) {
+                getLogger().log(Level.WARNING, "[BetterDragon] Error al cerrar ClaimStorage: " + e.getMessage(), e);
+            }
+        }
+        if (databaseManager != null) {
+            try {
+                databaseManager.close();
+            } catch (Exception e) {
+                getLogger().log(Level.WARNING, "[BetterDragon] Error al cerrar DatabaseManager: " + e.getMessage(), e);
+            }
         }
 
         getLogger()
@@ -1267,7 +1299,7 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
                     getLogger().info("[REWARD-CHECK-4] Participantes elegibles (p1 al 60.0% y p2 al 30.0% >= 20.0%) recibieron asignaciones.");
 
                     // 7. Verificar persistencia de reclamos en ClaimStorage (0% pérdidas ante offline)
-                    var claimsP1 = claimStorage.findByPlayer(p1);
+                    var claimsP1 = claimStorage.findByPlayer(p1).join();
                     if (claimsP1.isEmpty()) {
                         getLogger().severe("[REWARD-TEST-FAIL] No se guardaron reclamos en ClaimStorage para p1.");
                         return;
@@ -1282,9 +1314,9 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
                     getLogger().info("[REWARD-CHECK-6] BetterDragonRewardEvent despachado correctamente (conteo: 1).");
 
                     // 9. Verificar idempotencia estricta: re-procesar no duplica reclamos ni eventos
-                    int claimsBeforeRetry = claimStorage.findByBattleId(testBattleId).size();
+                    int claimsBeforeRetry = claimStorage.findByBattleId(testBattleId).join().size();
                     RewardAllocationPlan retryPlan = rewardService.processVictory(result);
-                    int claimsAfterRetry = claimStorage.findByBattleId(testBattleId).size();
+                    int claimsAfterRetry = claimStorage.findByBattleId(testBattleId).join().size();
 
                     if (claimsBeforeRetry != claimsAfterRetry) {
                         getLogger().severe("[REWARD-TEST-FAIL] Idempotencia falló: se duplicaron reclamos en almacenamiento ("

@@ -137,13 +137,13 @@ class RewardIntegrationTest {
         assertFalse(rewardEvent.getPlan().isEmpty());
 
         // 2. Verificar que los reclamos se registraron en ClaimStorage
-        List<RewardClaim> slayerClaims = claimStorage.findByPlayer(slayerId);
+        List<RewardClaim> slayerClaims = claimStorage.findByPlayer(slayerId).join();
         assertFalse(slayerClaims.isEmpty());
         for (RewardClaim claim : slayerClaims) {
             assertEquals(ClaimStatus.CLAIMED, claim.status());
         }
 
-        List<RewardClaim> assistantClaims = claimStorage.findByPlayer(assistantId);
+        List<RewardClaim> assistantClaims = claimStorage.findByPlayer(assistantId).join();
         assertFalse(assistantClaims.isEmpty());
         for (RewardClaim claim : assistantClaims) {
             assertEquals(ClaimStatus.CLAIMED, claim.status());
@@ -181,17 +181,17 @@ class RewardIntegrationTest {
         rewardListener.onDragonVictory(victoryEvent);
 
         // Reclamo en estado PENDING
-        List<RewardClaim> pendingClaims = claimStorage.findPendingByPlayer(offlinePlayerId);
+        List<RewardClaim> pendingClaims = claimStorage.findPendingByPlayer(offlinePlayerId).join();
         assertFalse(pendingClaims.isEmpty());
         assertEquals(0, inventoryAdapter.getDeliveredCount(offlinePlayerId));
 
         // El jugador se conecta
         inventoryAdapter.setOnline(offlinePlayerId, true);
-        int retriedCount = rewardService.retryPendingClaims(offlinePlayerId);
+        int retriedCount = rewardService.retryPendingClaims(offlinePlayerId).join();
         assertTrue(retriedCount > 0);
 
         // Todos los reclamos deben haber pasado a CLAIMED
-        List<RewardClaim> remainingPending = claimStorage.findPendingByPlayer(offlinePlayerId);
+        List<RewardClaim> remainingPending = claimStorage.findPendingByPlayer(offlinePlayerId).join();
         assertTrue(remainingPending.isEmpty());
         assertEquals(retriedCount, inventoryAdapter.getDeliveredCount(offlinePlayerId));
     }
@@ -207,7 +207,7 @@ class RewardIntegrationTest {
         rewardListener.onDragonVictory(victoryEvent);
 
         assertEquals(0, rewardEvents.size());
-        assertEquals(0, claimStorage.count());
+        assertEquals(0, claimStorage.count().join());
     }
 
     private static class MockInventoryAdapter implements PlayerInventoryAdapter {

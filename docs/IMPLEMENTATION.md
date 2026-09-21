@@ -26,8 +26,8 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 | **3.5** | **Motor de Habilidades y Fases** | Fases ordenadas, progresión monotónica por ratio de salud, AbilityEngine, TargetSelector, LocationResolver, efectos de combate (0% NMS), snapshots tipados, correcciones R1. | `COMPLETE` |
 | **3.6** | **Arena, Reglas y Límites** | Límites geométricos de arena, reglas anti-cheese, separación podium/centro, snapshot inmutable y correcciones R1. | `COMPLETE` |
 | **3.8–3.8-R2** | **Recompensas y Claims** | Hardening final: validación estricta de amount (enteros positivos exactos), Material nativo Paper API (sin heurísticos), Javadocs de idempotencia canónica, 245 tests unitarios. | `COMPLETE` |
-| **3.9** | **Persistencia SQLite** | Single-Writer Async Worker, almacenamiento persistente de claims y resultados históricos de batalla sin bloqueos. | `TODO (Siguiente Fase)` |
-| **3.10**| **Sistema de Leaderboard** | Agregación de estadísticas históricas (Top Slayers, Mayor Daño, Total Batallas) con caché en memoria. | `TODO` |
+| **3.9** | **Persistencia SQLite** | Single-Writer Async Worker, almacenamiento durable de claims en SQLite (`betterdragon.db`), versionado v1, restart recovery, no-blocking async, 260 tests. | `COMPLETE` |
+| **3.10**| **Sistema de Leaderboard** | Agregación de estadísticas históricas (Top Slayers, Mayor Daño, Total Batallas) con caché en memoria. | `TODO (Siguiente Fase)` |
 | **3.11**| **Framework de Comandos & GUI** | Implementación de `/betterdragon` y `/bd` (`spawn`, `cancel`, `status`, `reload`, `top`, `claim`). | `TODO` |
 | **3.12**| **Hardening Final y Cierre** | Pruebas de estrés, auditoría final de rendimiento y release candidate. | `TODO` |
 
@@ -207,10 +207,42 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 
 ---
 
-## 8. Próxima Fase: Fase 3.9 — Persistencia / Claims (SQLite) `[PENDIENTE]`
+## 8. Estado de la Fase 3.9 (Persistencia / Claims Durables SQLite) — `COMPLETE`
 
-- **Objetivo Arquitectónico:** Implementar la infraestructura de persistencia SQLite asíncrona para registrar resultados de batallas y respaldar `ClaimStorage` de forma duradera entre reinicios.
-- **Alcance Planificado:**
-  - Single-Writer Async Worker no bloqueante.
-  - Migración y versionado de esquema DDL en SQLite (`betterdragon.db`).
-  - Implementación `SqliteClaimStorage` conectada a `RewardService`.
+- **Infraestructura de Base de Datos y Dependencias (`maurxp.betterdragon.persistence`):**
+  - Driver `org.xerial:sqlite-jdbc:3.44.1.0` incluido en `pom.xml` e integrado en el JAR final mediante `maven-shade-plugin:3.6.0`, excluyendo binarios de Paper API y firmas de seguridad.
+  - `DatabaseManager`: Administrador centralizado de la conexión SQLite ubicado en `plugins/BetterDragon/data/betterdragon.db` (`JavaPlugin#getDataFolder()`). Configura `PRAGMA foreign_keys = ON;` y `PRAGMA busy_timeout = 5000;`.
+  - **Single-Writer Async Worker:** Ejecutor monohilo dedicado `persistenceExecutor` ("BetterDragon-Persistence") que serializa todas las escrituras y lecturas de persistencia fuera del hilo principal de Bukkit, garantizando cero bloqueos a los 20 TPS del servidor.
+  - `SchemaInitializer`: Inicializador DDL idempotente. Crea la tabla de metadatos `bd_schema_metadata` (`schema_version = 1`) y la tabla `bd_reward_claims` con índices optimizados por `status`, `participant_uuid` y `battle_id`.
+  - **Rechazo Fail-Safe:** Rechazo inmediato con `IllegalStateException` ante bases de datos con `schema_version > 1`, previniendo corrupción accidental por downgrades.
+- **Evolución Asíncrona de Claims (`maurxp.betterdragon.reward.claim`):**
+  - `ClaimStorage`: Interfaz evolucionada a un contrato no bloqueante basado en `CompletableFuture<T>`.
+  - `SQLiteClaimStorage`: Implementación relacional en SQLite. Persiste claims mapeados a columnas primitivas, garantizando idempotencia estricta mediante `INSERT INTO bd_reward_claims ... ON CONFLICT(idempotency_key) DO UPDATE SET ...`.
+  - Validación de integridad de material contra `Material.matchMaterial(...)` al deserializar filas de SQLite, evitando caídas ante cambios de versiones de Minecraft y previniendo falsos positivos de entrega completa.
+  - `InMemoryClaimStorage`: Actualizado a `CompletableFuture.completedFuture(...)`, preservado exclusivamente como arnés de pruebas unitarias.
+- **Desacoplamiento de Entrega y Reconexión (`maurxp.betterdragon.reward.delivery` y `service`):**
+  - `MainThreadDispatcher`: Abstracción funcional para delegar la entrega física de ítems en el hilo principal de Bukkit sin mezclar dependencias en los servicios asíncronos.
+  - `RewardDeliveryService`: Entrega no bloqueante retornando `CompletableFuture<DeliveryBatchResult>`, y reintentos vía `CompletableFuture<Integer>`.
+  - `DragonRewardListener`: Al recibir `PlayerJoinEvent`, consulta de forma asíncrona los claims pendientes del jugador y orquesta su entrega en el hilo principal sin bloquear el inicio de sesión.
+  - `BetterDragonPlugin`: Inicialización en `onEnable()` de `DatabaseManager`, validación de esquema, y cierre ordenado de conexiones y ejecutores en `onDisable()`.
+- **Pruebas de Persistencia SQLite (15 pruebas exhaustivas en `SQLiteClaimStorageTest`):**
+  - Creación de esquema y metadatos de versión (v1).
+  - Verificación de tablas e índices requeridos (`idx_reward_claims_status`, `idx_reward_claims_participant`, `idx_reward_claims_battle`).
+  - Inserción y recuperación de claims con todos sus campos primitivos e inmutables.
+  - Idempotencia estricta ante doble inserción de la misma clave canónica `idempotency_key`.
+  - Persistencia y coexistencia de estados `PENDING`, `CLAIMED` y `FAILED_RETRYABLE`.
+  - Entrega parcial y persistencia exacta del remanente `remaining_amount`.
+  - **Prueba de Recovery Real:** Ciclo completo de escritura -> cierre de base de datos -> reapertura de nueva instancia -> verificación de supervivencia de `PENDING` y `FAILED_RETRYABLE`, y exclusión de `CLAIMED` en consultas pendientes.
+  - Aislamiento estricto por UUID de jugador, Battle ID y Reward ID.
+  - Manejo seguro de materiales inválidos o desconocidos (prevención de `CLAIMED` silencioso).
+  - Escrituras concurrentes masivas sobre la misma clave sin duplicación de registros.
+  - Integración completa con `RewardDeliveryService` sobre SQLite real.
+  - Rechazo fail-safe de versiones futuras de esquema (`version 99`).
+  - Captura controlada de excepciones al operar sobre almacenamiento cerrado.
+  - **Total de pruebas del proyecto:** 260 pruebas ejecutadas, 0 fallos, 0 errores, 0 omitidos.
+
+---
+
+## 9. Próxima Fase: Fase 3.10 — Sistema de Leaderboard `[PENDIENTE]`
+
+- **Objetivo Arquitectónico:** Implementar agregación de estadísticas históricas de batallas (Top Slayers, Mayor Daño, Total Batallas Ganadas) respaldadas en SQLite con caché en memoria para consultas eficientes de alta velocidad.

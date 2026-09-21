@@ -491,9 +491,123 @@ Claim Storage (Buzón de reclamos en memoria PENDING / CLAIMED / FAILED_RETRYABL
 - Si una recompensa ya se encuentra en estado `CLAIMED` en `ClaimStorage`, cualquier invocación repetida de entrega es un no-op inmediato que no duplica ítems físicos.
 - El doble procesamiento de un `BattleResult` (por doble listener o retry) es seguro e inocuo.
 
-### 10.8 Límites de Almacenamiento en Memoria y Frontera con Fase 3.9
-- **`InMemoryClaimStorage` (Fase 3.8 / 3.8-R1):**
+### 10.8 Límites de Almacenamiento en Memoria (Fase 3.8)
+- **`InMemoryClaimStorage`:**
   - Almacenamiento concurrente seguro (`ConcurrentHashMap`) limitado al ciclo de vida del proceso de la JVM.
   - **Límites Documentados:** Los reclamos resguardados en memoria **NO** son persistentes ante reinicios del servidor, detenciones o recargas del plugin (`crash/restart`).
-- **Frontera Estricta con Fase 3.9:**
-  - La persistencia duradera en base de datos relacional SQLite (`betterdragon.db`), la recuperación de claims pendientes al encender el servidor y los comandos de usuario final (`/bd claim`) forman parte exclusiva de la **Fase 3.9**. La interfaz `ClaimStorage` garantiza que este paso se dará sin tocar el motor de recompensas.
+  - Desde la Fase 3.9, se conserva exclusivamente como infraestructura de pruebas unitarias aisladas.
+
+---
+
+## 11. Persistencia Durable SQLite y Buzón de Reclamos (Fase 3.9)
+
+### 11.1 Almacenamiento Durable y Desacoplamiento de Persistencia
+A partir de la Fase 3.9, BetterDragon implementa almacenamiento duradero basado en SQLite embebido (`plugins/BetterDragon/data/betterdragon.db`):
+- **Abstracción `ClaimStorage`:** La interfaz de almacenamiento fue evolucionada a un contrato totalmente asíncrono basado en `CompletableFuture<T>`. Ninguna consulta o mutación de persistencia expone conexiones JDBC al dominio ni bloquea el hilo que la invoca.
+- **`SQLiteClaimStorage`:** Implementación productiva respaldada por SQLite. Mapea modelos de dominio inmutables (`RewardClaim`) a columnas relacionales normalizadas sin recurrir a serialización Java de objetos ni almacenar objetos de Bukkit (`Player`, `Inventory`, `ItemStack`).
+- **`InMemoryClaimStorage`:** Se mantiene intacto para tests unitarios rápidos y deterministas. **Regla de integridad:** El plugin en producción **nunca** realiza un fallback silencioso a `InMemoryClaimStorage` si SQLite falla; la inicialización falla de forma explícita y fail-safe para evitar pérdida silenciosa de recompensas.
+
+### 11.2 Topología de Hilos y Single-Writer Dedicado
+SQLite opera bajo un modelo de concurrencia estrictamente controlado mediante un ejecutor de persistencia dedicado (*Single-Writer Async Worker*):
+```
+Hilo Principal Bukkit (Main Thread)               Persistence Worker Thread (Async)
+───────────────────────────────────               ─────────────────────────────────
+• Eventos Bukkit (Victory / Join)
+• Player / Inventory / Item delivery
+• Decisiones de gameplay
+        │
+        │ [1. deliverPlan / retryPending]
+        ▼
+RewardDeliveryService ────────────────────────► [2. Query claims / idempotencyKey]
+                                                          │
+                                                          ▼
+                                                  DatabaseManager / SQLite
+                                                  (Single-Writer Executor)
+                                                          │
+                                                          ▼
+[4. Entrega física en inventario] ◄─────────── [3. CompletableFuture callback]
+(vía MainThreadDispatcher)
+        │
+        ▼
+[5. Confirmación de entrega] ─────────────────► [6. Update estado / remainingAmount]
+                                                          │
+                                                          ▼
+                                                  COMMIT a SQLite
+```
+- **Cero JDBC en Main Thread:** Ninguna instrucción `DriverManager`, `PreparedStatement` ni `ResultSet` se ejecuta en el hilo principal del servidor.
+- **Cero Objetos Bukkit en Async:** Instancias de `Player`, `Inventory`, `World` o `Entity` jamás se envían a los hilos de persistencia. Solo se intercambian tipos primitivos, `UUID`, cadenas y DTOs inmutables de dominio.
+- **`MainThreadDispatcher`:** Interfaz funcional (`Consumer<Runnable>`) inyectada en `RewardDeliveryService` que permite planificar las entregas físicas en el hilo de Bukkit (`runTask(plugin, runnable)`), facilitando al mismo tiempo la ejecución directa inline (`Runnable::run`) en pruebas unitarias deterministas.
+
+### 11.3 Configuración de Conexión y Pragmas SQLite
+`DatabaseManager` gestiona el ciclo de vida de la conexión JDBC SQLite bajo parámetros seguros:
+- `PRAGMA foreign_keys = ON;`: Garantiza integridad referencial.
+- `PRAGMA busy_timeout = 5000;`: Evita bloqueos inmediatos por contención de I/O en disco durante escrituras concurrentes de checkpoint.
+- Conexión persistente única poseída exclusivamente por `DatabaseManager`. Ninguna otra clase tiene acceso directo a la `Connection`.
+
+### 11.4 Esquema Relacional y Versionado (`SchemaInitializer`)
+El esquema inicial v1 se define e inicializa de forma completamente idempotente:
+- **Tabla de Metadatos (`bd_schema_metadata`):**
+  - Estructura clave-valor (`key TEXT PRIMARY KEY`, `value TEXT NOT NULL`).
+  - Almacena `schema_version = 1`.
+  - **Rechazo Fail-Safe:** Si al arrancar se detecta `schema_version > CURRENT_SCHEMA_VERSION` (por ejemplo, una base de datos proveniente de una versión más reciente del plugin), el sistema arroja `IllegalStateException` y detiene el subsistema de persistencia inmediatamente sin intentar downgrades destructivos ni sobrescribir datos.
+- **Tabla Principal (`bd_reward_claims`):**
+  - Columnas: `claim_id` (UUID string PK), `idempotency_key` (TEXT UNIQUE NOT NULL), `battle_id` (UUID string NOT NULL), `participant_uuid` (UUID string NOT NULL), `player_name` (TEXT NOT NULL), `source` (TEXT NOT NULL, ej. PARTICIPATION, SLAYER), `material` (TEXT NOT NULL, nombre canónico de Paper), `display_name` (TEXT), `lore` (TEXT multilinea), `original_amount` (INTEGER NOT NULL), `delivered_amount` (INTEGER NOT NULL), `remaining_amount` (INTEGER NOT NULL), `status` (TEXT NOT NULL: PENDING, CLAIMED, FAILED_RETRYABLE), `created_at` (INTEGER epoch ms NOT NULL), `claimed_at` (INTEGER epoch ms), `failure_reason` (TEXT), `updated_at` (INTEGER epoch ms NOT NULL).
+- **Índices de Rendimiento:**
+  - `idx_reward_claims_status` sobre `status`.
+  - `idx_reward_claims_participant` sobre `participant_uuid`.
+  - `idx_reward_claims_battle` sobre `battle_id`.
+
+### 11.5 Idempotencia Durable, Separación Create/Update y Estado Terminal CLAIMED
+La clave canónica de deduplicación:
+$$\text{idempotencyKey} = \text{battleId} + ":" + \text{participantId} + ":" + \text{rewardId}$$
+está resguardada por la restricción `UNIQUE(idempotency_key)` a nivel de base de datos.
+
+La mutación y ciclo de vida de los reclamos separa estrictamente la creación de la actualización:
+1. **Creación Idempotente (`createIfAbsent`):**
+   ```sql
+   INSERT INTO bd_reward_claims (...) VALUES (...)
+   ON CONFLICT(idempotency_key) DO NOTHING;
+   SELECT * FROM bd_reward_claims WHERE idempotency_key = ?;
+   ```
+   Si el reclamo ya existía, no es modificado y se retorna la entidad persistida preexistente con su estado actual.
+2. **Actualización Condicional (`updateExisting`):**
+   ```sql
+   UPDATE bd_reward_claims SET
+       player_name = ?, delivered_amount = ?, remaining_amount = ?,
+       status = ?, claimed_at = ?, failure_reason = ?, updated_at = ?
+   WHERE idempotency_key = ?
+     AND status != 'CLAIMED';
+   ```
+   **`CLAIMED` como Estado Terminal Definitivo:** Una vez que un reclamo alcanza el estado persistente `CLAIMED`, ninguna actualización posterior (incluso proveniente de un objeto obsoleto con estado `CLAIMED`) puede modificarlo. Cualquier intento es rechazado retornando `false` y sin alterar ninguna columna.
+3. **Deduplicación Concurrente en Memoria:** `inFlightDeliveries` (`ConcurrentHashMap`) coalesce entregas concurrentes sobre la misma clave en runtime, evitando doble entrega física.
+
+### 11.6 Recuperación tras Reinicio (Restart Recovery)
+Al reiniciar el servidor:
+1. La base de datos SQLite se conecta y valida el esquema.
+2. Los reclamos con estado `PENDING` y `FAILED_RETRYABLE` se conservan intactos con su `remaining_amount`.
+3. Los reclamos en estado `CLAIMED` no se reactivan como pendientes, pero permanecen almacenados para garantizar idempotencia histórica y auditoría.
+4. Al ingresar un jugador (`PlayerJoinEvent`), `DragonRewardListener` invoca `rewardService.retryPendingClaims(player.getUniqueId())` de forma no bloqueante:
+   - Consulta los claims pendientes en el worker asíncrono.
+   - Si existen, despacha la entrega física al hilo principal mediante `MainThreadDispatcher`.
+   - Tras depositar los ítems en el inventario de Bukkit, persiste asíncronamente el nuevo estado (`CLAIMED` o remanente actualizado).
+
+### 11.7 Limitación Explícita de Consistencia ante Caídas (Crash Consistency Limitation)
+> [!IMPORTANT]
+> **Garantía Real vs. Atomicidad Transaccional de Minecraft:**
+> BetterDragon **NO** puede garantizar atomicidad hardware "exactly-once" coordinada entre el archivo SQLite en disco y el inventario del jugador almacenado en los archivos de región/NBT de Minecraft (`world/playerdata/*.dat`).
+> Ambos representan subsistemas de persistencia independientes sin soporte de protocolo de commit en dos fases (*Two-Phase Commit / 2PC*).
+>
+> Existe una ventana de vulnerabilidad teórica inherente a la arquitectura de Minecraft:
+> 1. Un ítem es depositado físicamente en la memoria del inventario del jugador en el hilo principal de Bukkit.
+> 2. El servidor experimenta una caída catastrófica (ej. `kill -9`, apagón eléctrico del host o crash de la JVM) en el microsegundo exacto antes de que el worker asíncrono logre persistir el estado `CLAIMED` en SQLite.
+> 3. Al reiniciar, el claim en SQLite continuará figurando como `PENDING`. Si el guardado de chunks/jugadores de Minecraft logró escribir el inventario a disco antes del corte, el jugador podría recibir nuevamente el remanente en el siguiente inicio.
+>
+> **Mitigación Adoptada:**
+> - BetterDragon implementa la política *at-least-once con deduplicación optimista*: **jamás** se marca un claim como `CLAIMED` en SQLite antes de haber confirmado la entrega efectiva en el hilo principal.
+> - Se prefiere el riesgo acotado de un reintento en un crash catastrófico antes que arriesgar la pérdida silenciosa de ítems legítimos de los jugadores.
+
+### 11.8 Apagado Limpio (Graceful Shutdown)
+Durante `onDisable()`:
+1. Se rechazan nuevos trabajos en `DatabaseManager`.
+2. El ejecutor dedicado `persistenceExecutor` ejecuta las tareas en cola y se cierra con `shutdown()` y espera controlada (`awaitTermination(5, SECONDS)`).
+3. La conexión JDBC `connection.close()` se cierra formalmente, forzando la sincronización de cualquier journal pendiente.
