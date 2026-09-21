@@ -73,6 +73,25 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.server.ServerCommandEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import maurxp.betterdragon.application.admin.AdminApplicationService;
+import maurxp.betterdragon.application.arena.ArenaQueryService;
+import maurxp.betterdragon.application.battle.BattleAdminService;
+import maurxp.betterdragon.application.leaderboard.LeaderboardApplicationService;
+import maurxp.betterdragon.application.permission.BukkitPermissionChecker;
+import maurxp.betterdragon.application.permission.PermissionChecker;
+import maurxp.betterdragon.application.reward.RewardApplicationService;
+import maurxp.betterdragon.command.BetterDragonCommand;
+import maurxp.betterdragon.command.CommandRegistry;
+import maurxp.betterdragon.command.subcommand.AbortSubCommand;
+import maurxp.betterdragon.command.subcommand.ArenaSubCommand;
+import maurxp.betterdragon.command.subcommand.ClaimSubCommand;
+import maurxp.betterdragon.command.subcommand.HelpSubCommand;
+import maurxp.betterdragon.command.subcommand.LeaderboardSubCommand;
+import maurxp.betterdragon.command.subcommand.ReloadSubCommand;
+import maurxp.betterdragon.command.subcommand.StartSubCommand;
+import maurxp.betterdragon.command.subcommand.StatsSubCommand;
+import maurxp.betterdragon.command.subcommand.StatusSubCommand;
+
 import java.io.File;
 import java.util.List;
 import java.util.Optional;
@@ -107,6 +126,14 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
     private RewardService rewardService;
     private LeaderboardStorage leaderboardStorage;
     private LeaderboardService leaderboardService;
+    private PermissionChecker permissionChecker;
+    private LeaderboardApplicationService leaderboardAppService;
+    private BattleAdminService battleAdminService;
+    private ArenaQueryService arenaQueryService;
+    private AdminApplicationService adminAppService;
+    private RewardApplicationService rewardAppService;
+    private CommandRegistry commandRegistry;
+    private BetterDragonCommand betterDragonCommand;
 
     @Override
     public void onEnable() {
@@ -196,7 +223,34 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
 
             getServer().getPluginManager().registerEvents(this, this);
 
-            // 10. Tarea periódica de evaluación de fases y habilidades (Hilo principal)
+            // 10. Inicializar Application Layer y Command Framework (Fase 3.11)
+            this.permissionChecker = new BukkitPermissionChecker();
+            this.leaderboardAppService = new LeaderboardApplicationService(leaderboardService);
+            this.battleAdminService = new BattleAdminService(battleManager, sessionManager, configurationService, getLogger());
+            this.arenaQueryService = new ArenaQueryService(configurationService);
+            this.adminAppService = new AdminApplicationService(configurationService, this::getDataFolder);
+            this.rewardAppService = new RewardApplicationService(rewardService, claimStorage);
+
+            this.commandRegistry = new CommandRegistry(permissionChecker, getLogger());
+            this.commandRegistry.register(new HelpSubCommand(commandRegistry));
+            this.commandRegistry.register(new LeaderboardSubCommand(leaderboardAppService));
+            this.commandRegistry.register(new StatsSubCommand(leaderboardAppService, permissionChecker));
+            this.commandRegistry.register(new StatusSubCommand(battleAdminService));
+            this.commandRegistry.register(new StartSubCommand(battleAdminService, arenaQueryService));
+            this.commandRegistry.register(new AbortSubCommand(battleAdminService));
+            this.commandRegistry.register(new ReloadSubCommand(adminAppService));
+            this.commandRegistry.register(new ArenaSubCommand(arenaQueryService));
+            this.commandRegistry.register(new ClaimSubCommand(rewardAppService, mainThreadDispatcher));
+
+            this.betterDragonCommand = new BetterDragonCommand(commandRegistry);
+            try {
+                getServer().getCommandMap().register("betterdragon", betterDragonCommand);
+                getLogger().info("[BetterDragon] Comandos /betterdragon y /bd registrados exitosamente.");
+            } catch (Throwable t) {
+                getLogger().log(Level.WARNING, "[BetterDragon] No se pudo registrar el comando en CommandMap: " + t.getMessage(), t);
+            }
+
+            // 11. Tarea periódica de evaluación de fases y habilidades (Hilo principal)
             getServer().getScheduler().runTaskTimer(this, () -> {
                 long currentTick = Bukkit.getCurrentTick();
                 for (BattleSession session : sessionManager.getAllSessions().values()) {
@@ -230,6 +284,14 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
         if (sessionManager != null && sessionManager.getSessionCount() > 0) {
             getLogger().info("[BetterDragon] Preservando " + sessionManager.getSessionCount()
                     + " sesiones y dragones activos para recuperación futura.");
+        }
+
+        // Desregistrar comando si fue registrado
+        if (betterDragonCommand != null) {
+            try {
+                betterDragonCommand.unregister(getServer().getCommandMap());
+            } catch (Throwable ignored) {
+            }
         }
 
         // Cierre ordenado de persistencia durable (Fase 3.9 / 3.10)
@@ -347,6 +409,38 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
 
     public LeaderboardService getLeaderboardService() {
         return leaderboardService;
+    }
+
+    public PermissionChecker getPermissionChecker() {
+        return permissionChecker;
+    }
+
+    public LeaderboardApplicationService getLeaderboardAppService() {
+        return leaderboardAppService;
+    }
+
+    public BattleAdminService getBattleAdminService() {
+        return battleAdminService;
+    }
+
+    public ArenaQueryService getArenaQueryService() {
+        return arenaQueryService;
+    }
+
+    public AdminApplicationService getAdminAppService() {
+        return adminAppService;
+    }
+
+    public RewardApplicationService getRewardAppService() {
+        return rewardAppService;
+    }
+
+    public CommandRegistry getCommandRegistry() {
+        return commandRegistry;
+    }
+
+    public BetterDragonCommand getBetterDragonCommand() {
+        return betterDragonCommand;
     }
 
     /**

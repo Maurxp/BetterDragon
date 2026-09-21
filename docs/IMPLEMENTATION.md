@@ -28,8 +28,8 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 | **3.8–3.8-R2** | **Recompensas y Claims** | Hardening final: validación estricta de amount (enteros positivos exactos), Material nativo Paper API (sin heurísticos), Javadocs de idempotencia canónica, 245 tests unitarios. | `COMPLETE` |
 | **3.9–3.9-R2** | **Persistencia SQLite** | Single-Writer Async Worker, almacenamiento durable de claims en SQLite (`betterdragon.db`), versionado v1, restart recovery, protección terminal CLAIMED, no-blocking async, 271 tests. | `COMPLETE` |
 | **3.10** | **Sistema de Leaderboard** | Leaderboard persistente, SQLite schema v2, migración v1 → v2, historial de batallas y participación, estadísticas por UUID, rankings deterministas, transacciones atómicas, idempotencia, BattleResult, persistencia async, 289 tests. | `COMPLETE` |
-| **3.11** | **Commands / Admin UX** | Implementación de comandos administrativos y de consulta (`/betterdragon` y `/bd`: `spawn`, `cancel`, `status`, `reload`, `top`, `claim`). | `TODO (Siguiente Fase)` |
-| **3.12** | **Hardening Final y Cierre** | Pruebas de estrés, auditoría final de rendimiento y release candidate. | `TODO` |
+| **3.11–3.11-R1** | **Commands / Admin UX** | Arquitectura Application Layer compartida (preparada para futuras GUIs), `/betterdragon` y alias `/bd`, CommandRegistry, permisos granulares, console safety, subcomandos, hardening de hilo en /bd claim con MainThreadDispatcher, 314 tests. | `COMPLETE` |
+| **3.12** | **Hardening Final y Cierre** | Pruebas de estrés, auditoría final de rendimiento y release candidate. | `TODO (Siguiente Fase)` |
 
 ---
 
@@ -283,6 +283,54 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 
 ---
 
-## 10. Próxima Fase: Fase 3.11 — Commands / Admin UX `[PENDIENTE]`
+## 10. Estado de la Fase 3.11 (Commands / Admin UX & Application Layer) — `COMPLETE`
 
-- **Objetivo Arquitectónico:** Implementar la capa de comandos y administración/UX del plugin (`/betterdragon` y `/bd`), comandos administrativos (`spawn`, `cancel`, `status`, `reload`) y consultas del leaderboard mediante comandos (`/bd top`, `/bd stats`).
+- **Capa de Aplicación Compartida (`maurxp.betterdragon.application`):**
+  - `maurxp.betterdragon.application.permission`:
+    - `CommandPermission`: Enum tipado con nodos `betterdragon.use`, `betterdragon.leaderboard`, `betterdragon.stats`, `betterdragon.stats.others`, `betterdragon.claim`, `betterdragon.admin.*`.
+    - `PermissionChecker` & `BukkitPermissionChecker`: Comprobación desacoplada y nativa sin dependencias externas.
+  - `maurxp.betterdragon.application.leaderboard`:
+    - `LeaderboardApplicationService`: Consultas asíncronas no bloqueantes con límites sanitizados y resolución de perfiles por UUID y query.
+  - `maurxp.betterdragon.application.battle`:
+    - `BattleAdminService`: Invocación segura de inicio y cancelación, comprobando dimensión `THE_END` y unicidad de batalla.
+    - `BattleStatusView`: DTO inmutable de lectura con cálculo de porcentaje de salud y duración de sesión.
+    - `BattleOperationResult`: Resultado tipado inmutable de operaciones administrativas (`success`, `message`).
+  - `maurxp.betterdragon.application.arena`:
+    - `ArenaQueryService`: Listado e inspección de detalle de arenas desde `ConfigurationService`.
+    - `ArenaSummaryView` & `ArenaDetailView`: Modelos de vista desacoplados de Bukkit.
+  - `maurxp.betterdragon.application.admin`:
+    - `AdminApplicationService`: Coordinación atómica y fail-safe de recarga de configuración.
+    - `ReloadResult`: Resultado tipado con tiempo transcurrido en milisegundos.
+  - `maurxp.betterdragon.application.reward`:
+    - `RewardApplicationService`: Consultas y reclamo manual no bloqueante de recompensas pendientes en SQLite.
+- **Framework de Comandos (`maurxp.betterdragon.command` y `subcommand`):**
+  - `CommandRegistry`: Registro dinámico, enrutamiento por nombre canónico y alias, compuertas de permisos y manejo de excepciones no invasivo (cero stack traces al usuario).
+  - `BetterDragonCommand`: Implementación de `org.bukkit.command.Command` registrada directamente en el `CommandMap` de Bukkit con alias `/bd`.
+  - `CommandContext`: Contexto inmutable con utilidades de emisor y mensajería.
+  - `AllowedSender`: Control estricto de Console Safety (`PLAYER_ONLY`, `CONSOLE_ONLY`, `BOTH`).
+  - `CommandMessages`: Prefijos, encabezados y formato de mensajes centralizados.
+  - **Subcomandos Productivos:**
+    - `HelpSubCommand` (`/bd help [subcomando]`)
+    - `LeaderboardSubCommand` (`/bd leaderboard [damage|slayers|battles] [límite]`)
+    - `StatsSubCommand` (`/bd stats [jugador]`)
+    - `StatusSubCommand` (`/bd status [mundo]`)
+    - `StartSubCommand` (`/bd start [mundo] [arena] [definición]`)
+    - `AbortSubCommand` (`/bd abort [mundo|battleId]`)
+    - `ReloadSubCommand` (`/bd reload`)
+    - `ArenaSubCommand` (`/bd arena <list|info> [id]`)
+    - `ClaimSubCommand` (`/bd claim`)
+- **Preparación para Futura GUI:**
+  - Los servicios de aplicación están 100% aislados de la CLI de comandos y de inventarios de Bukkit.
+  - Una futura interfaz gráfica invocará directamente los mismos métodos de `BattleAdminService`, `LeaderboardApplicationService`, `ArenaQueryService` y `RewardApplicationService`.
+- **Pruebas Automatizadas:**
+  - `ApplicationLayerTest`: 6 pruebas exhaustivas de la capa de aplicación (vistas, límites, recarga, resiliencia ante nulos).
+  - `CommandFrameworkTest`: 8 pruebas del framework (registro, alias, permisos, consola vs jugador, tab completion, excepciones).
+  - `SubCommandsExecutionTest`: 6 pruebas de ejecución de subcomandos (help, leaderboard, arena, reload, status, start/abort).
+  - `ClaimSubCommandThreadSafetyTest`: 5 pruebas de seguridad de hilos y retorno al main thread (éxito, error, vacío, defensivo, consola).
+  - **Total de pruebas del proyecto:** 314 pruebas ejecutadas, 0 fallos, 0 errores, 0 omitidos.
+
+---
+
+## 11. Próxima Fase: Fase 3.12 — Hardening Final y Cierre `[PENDIENTE]`
+
+- **Objetivo Arquitectónico:** Pruebas de estrés, auditoría final de rendimiento, verificación de empaquetado y preparación de release candidate.

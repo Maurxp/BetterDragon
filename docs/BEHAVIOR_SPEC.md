@@ -17,7 +17,7 @@ BetterDragon es un plugin para Paper que toma la **soberanía exclusiva del cicl
 - **Respawn tras Downtime:** El sistema entra en `ARMED_WAITING_PLAYER` y espera a que un jugador ingrese a la dimensión del End antes de invocar al dragón.
 - **Portal Central (`portal.enabled`):** Si `portal.enabled: false`, BetterDragon **no crea, no modifica, no restaura y no administra** el portal de salida de bedrock vanilla.
 - **BossBar Vanilla:** Neutralizada de forma determinista mediante el adaptador NMS aislado (`VanillaBossBarController`). El método `restoreVanillaBossBar()` fue eliminado permanentemente.
-- **Leaderboard:** Incluido en el MVP y respaldado por SQLite. La interfaz de consulta mediante comandos queda reservada para la Fase 3.11.
+- **Leaderboard:** Incluido en el MVP y respaldado por SQLite. La interfaz de consulta mediante comandos fue implementada en la Fase 3.11.
 - **Estatuas / NPCs:** Fuera del alcance del MVP.
 - **Comandos:** `/betterdragon` (canónico) y `/bd` (alias oficial).
 - **Core 0% NMS:** Sin dependencias de internals de Minecraft fuera de `platform.bossbar`.
@@ -211,7 +211,7 @@ La batalla opera como una Máquina de Estados Finitos (FSM) confinada al hilo pr
   - **Topología No Bloqueante (Single-Writer Async):** Toda interacción JDBC (`SELECT`, `INSERT`, `UPDATE`, checkpoint) se ejecuta fuera del hilo principal en un ejecutor dedicado secuencial (`PersistenceExecutor`). Cero llamadas de base de datos bloquean los 20 TPS de Bukkit.
   - **Esquema Relacional Inicial y Versionado (v1):** Creación e inicialización DDL idempotente con tabla de metadatos `bd_schema_metadata` registrando `schema_version = 1`.
   - **Rechazo Fail-Safe de Versiones Futuras:** Si la base de datos registra una versión mayor a la soportada por el plugin (`schema_version > 1`), el subsistema arroja `IllegalStateException` y se detiene inmediatamente sin realizar modificaciones destructivas.
-  - **Idempotencia Relacional Estricta:** Restricción `UNIQUE(idempotency_key)` sobre `battleId:participantId:rewardId` y mutaciones atómicas `INSERT INTO bd_reward_claims ... ON CONFLICT(idempotency_key) DO UPDATE SET ...`.
+  - **Idempotencia Relacional Estricta:** Restricción `UNIQUE(idempotency_key)` sobre `battleId:participantId:rewardId` coordinada mediante `createIfAbsent` con `INSERT INTO bd_reward_claims ... ON CONFLICT(idempotency_key) DO NOTHING` y recuperación del registro persistido, complementado por `updateExisting` separado con cláusula `WHERE idempotency_key = ? AND status != 'CLAIMED'` que impide mutar claims cuyo estado terminal ya sea `CLAIMED`.
   - **Ciclo de Vida Durable de Reclamos:**
     - `PENDING`: Sobrevive reinicios del servidor. Se crea cuando un jugador está desconectado o con inventario saturado, registrando `remaining_amount`.
     - `CLAIMED`: Recompensa físicamente entregada en su totalidad (`remaining_amount = 0`). No vuelve a entregarse tras reiniciar, pero permanece almacenada para auditoría e idempotencia.
@@ -221,7 +221,7 @@ La batalla opera como una Máquina de Estados Finitos (FSM) confinada al hilo pr
     - Al ingresar un jugador (`PlayerJoinEvent`), `DragonRewardListener` solicita asíncronamente sus reclamos pendientes y transfiere la entrega física al hilo principal mediante `MainThreadDispatcher`, actualizando el estado resultante en SQLite.
   - **Limitación Documentada de Consistencia ante Caídas:** BetterDragon no afirma falsas garantías transaccionales "exactly-once" coordinadas entre SQLite y el guardado de inventarios NBT de Minecraft. La política es *at-least-once con deduplicación optimista*: nunca se marca un claim como `CLAIMED` antes de confirmar la entrega en memoria en el hilo principal.
   - **Prohibición de Fallback Silencioso:** Si SQLite falla al inicializarse, el plugin no degrada silenciosamente a `InMemoryClaimStorage` fingiendo durabilidad; reporta el error y bloquea el procesamiento persistente para evitar pérdidas silenciosas.
-  - **Comandos de Usuario:** Sin comandos `/bd claim` ni `/bd rewards` en esta fase (congelados para la Fase 3.11 — Commands / Admin UX).
+  - **Comandos de Usuario:** El comando de reclamo manual de recompensas pendientes se encuentra implementado mediante `/bd claim` (Fase 3.11). No existe un comando independiente `/bd rewards`.
 - **Recuperación tras Reinicio:**
   - Dragones con PDC detectados durante el arranque sin batalla activa en memoria son removidos de forma limpia para evitar entidades huérfanas. `[CONSOLIDADO EN 3.3-R1]`
 
@@ -263,3 +263,51 @@ La batalla opera como una Máquina de Estados Finitos (FSM) confinada al hilo pr
   - `bd_reward_claims` permanece intacta e independiente.
 - **Sin Bloqueo del Hilo Principal:**
   - Todas las operaciones de lectura y escritura se ejecutan de manera asíncrona mediante `CompletableFuture` en el worker de `DatabaseManager`.
+
+---
+
+## 9. Comandos, Permisos y UX Administrativo (Fase 3.11) `[COMPLETADA]`
+
+- **Puntos de Entrada Canónicos:**
+  - Comando raíz: `/betterdragon`
+  - Alias oficial: `/bd`
+  - Registrados atómicamente en el `CommandMap` de Bukkit/Paper durante `onEnable()`.
+- **Estructura y Comportamiento de Subcomandos:**
+  - `/bd help [subcomando]`: Muestra la lista de subcomandos disponibles según los permisos del emisor o información detallada (descripción, sintaxis, alias, permiso requerido, emisores permitidos) de un subcomando específico.
+  - `/bd leaderboard [damage|slayers|battles] [límite]` (alias: `top`, `lb`): Consulta asíncrona no bloqueante de los rankings SQLite. Admite categorías `damage` (daño acumulado y media), `slayers` (victorias como Slayer), y `battles` (participaciones totales). Aplica límite máximo de 20 líneas en chat para evitar spam.
+  - `/bd stats [jugador]` (alias: `perfil`, `estadisticas`): Muestra estadísticas detalladas del jugador (UUID, batallas participadas, daño total, daño récord, promedio y victorias como Slayer). Si se omite argumento, consulta el propio emisor. Si se especifica un argumento, requiere el permiso `betterdragon.stats.others`; acepta UUID directo y resuelve jugadores online o presentes en la caché del servidor (`Bukkit.getOfflinePlayerIfCached`). No realiza una resolución arbitraria de nombres históricos directamente desde SQLite.
+  - `/bd status [mundo]` (alias: `estado`): Muestra el estado en tiempo real de la batalla activa (fase actual, barra de vida y porcentaje, tiempo transcurrido, participantes y damager líder). Si se ejecuta desde consola sin argumentos, lista el estado de todas las batallas activas en el servidor.
+  - `/bd start [mundo] [arena] [definición]` (alias: `spawn`, `iniciar`): Inicia una batalla controlada de forma segura. Valida que el mundo exista, esté cargado y pertenezca al entorno `THE_END`, y que no exista una batalla previa activa en dicho mundo. Si se ejecuta desde consola, el argumento `mundo` es estrictamente obligatorio.
+  - `/bd abort [mundo|battleId]` (alias: `cancel`, `cancelar`, `stop`): Cancela formalmente una sesión activa en el mundo o por su UUID de batalla, eliminando la entidad física administrada sin decretar victoria falsa ni entregar botín.
+  - `/bd reload` (alias: `recargar`): Ejecuta una recarga atómica y fail-safe de `config.yml` y `arenas.yml`. Si los archivos contienen errores sintácticos o de validación, la recarga se rechaza conservando intacta la configuración activa anterior y preservando las sesiones de batalla en curso.
+  - `/bd arena <list|info> [id]` (alias: `arenas`):
+    - `list`: Lista todas las arenas cargadas en memoria indicando mundo, arena por defecto y límites AABB.
+    - `info <id>`: Detalla centro aéreo de combate, podio terrestre de salida, dimensiones espaciales y reglas geométricas activas (`water_allowed`, `boundary`, `anti_tunnel`).
+  - `/bd claim` (alias: `reclamar`, `recompensas`): Comando exclusivo de jugador para solicitar la entrega manual de ítems pendientes en su buzón durable de SQLite tras liberar espacio en su inventario.
+- **Modelo Granular de Permisos:**
+  - `betterdragon.use`: Permiso base para interactuar con la interfaz de BetterDragon (por defecto: `true` para todos los usuarios).
+  - `betterdragon.leaderboard`: Permite consultar el ranking global persistente (por defecto: `true`).
+  - `betterdragon.stats`: Permite consultar las estadísticas de combate propias (por defecto: `true`).
+  - `betterdragon.stats.others`: Permite inspeccionar las estadísticas de otros jugadores (por defecto: `op`).
+  - `betterdragon.claim`: Permite reclamar recompensas pendientes (por defecto: `true`).
+  - `betterdragon.admin`: Permiso administrativo comodín que habilita todas las operaciones de gestión (por defecto: `op`).
+  - `betterdragon.admin.status`: Permite consultar el estado de batallas activas (por defecto: `op`).
+  - `betterdragon.admin.start`: Permite iniciar batallas manualmente (por defecto: `op`).
+  - `betterdragon.admin.abort`: Permite abortar o cancelar batallas activas (por defecto: `op`).
+  - `betterdragon.admin.reload`: Permite recargar la configuración del plugin (por defecto: `op`).
+  - `betterdragon.admin.arena`: Permite inspeccionar la configuración de arenas (por defecto: `op`).
+- **Seguridad de Consola (Console Safety):**
+  - Todo subcomando declara explícitamente su emisor admitido (`PLAYER_ONLY`, `CONSOLE_ONLY`, `BOTH`).
+  - Subcomandos que operan sobre la ubicación del jugador (como `/bd claim`) rechazan la consola con un mensaje claro sin arrojar `ClassCastException`.
+  - Subcomandos como `/bd start` y `/bd abort` exigen a la consola especificar explícitamente el nombre del mundo.
+- **Asincronía y Rendimiento:**
+  - Toda interacción con SQLite originada por comandos (`leaderboard`, `stats`, `claim`) retorna `CompletableFuture` y se despacha fuera del hilo principal.
+  - Cero bloqueos con `future.get()` o `future.join()` en el hilo de ticks de Bukkit.
+  - Las respuestas se renderizan de forma no invasiva notificando al usuario al completarse la consulta; en particular, la presentación final de `/bd claim` garantiza su retorno al hilo principal mediante `MainThreadDispatcher`.
+- **Tab Completion:**
+  - Autocompletado contextual y determinista para subcomandos y argumentos (categorías de ranking, IDs de arenas, mundos cargados).
+  - Filtra estrictamente las opciones según los permisos reales del emisor.
+  - No ejecuta consultas I/O a disco ni a base de datos durante los eventos de autocompletado.
+- **Manejo de Errores y Presentación:**
+  - Errores de sintaxis y argumentos inválidos devuelven mensajes formateados claros con sugerencias de uso.
+  - Excepciones internas imprevistas son registradas en el logger con detalle técnico mientras que al emisor se le informa de manera amigable sin mostrar trazas de error (stack traces) en el chat.

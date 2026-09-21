@@ -690,3 +690,82 @@ SQLiteLeaderboardStorage (JDBC / Single-Writer Async)
 
 ### 12.7 Limitaciones de Consistencia
 - No existe un protocolo de dos fases (2PC) entre eventos de Bukkit y SQLite. La garantía formal es: *una vez confirmada la transacción en SQLite, ningún reintento o re-procesamiento del mismo `battle_id` duplicará contadores o estadísticas acumuladas*.
+
+---
+
+## 13. Application Layer, Interfaz de Comandos y UX Administrativo (Fase 3.11)
+
+### 13.1 Principio Arquitectónico Fundamental: Desacoplamiento de Interfaz
+BetterDragon 3.11 establece una frontera formal entre las capas de entrada (CLI y futuras interfaces gráficas) y el núcleo de negocio mediante una **Capa de Aplicación (Application Layer)**:
+
+```
+                    BetterDragon
+                         │
+             ┌───────────┴───────────┐
+             │                       │
+        Commands CLI            FUTURE GUI
+             │                       │
+             └───────────┬───────────┘
+                         ▼
+                 APPLICATION LAYER
+                         │
+          ┌──────────────┼──────────────┐
+          ▼              ▼              ▼
+       Battles        Rewards       Leaderboard
+                         │
+                         ▼
+                      DOMAIN
+                         │
+                         ▼
+                    Persistence
+```
+
+### 13.2 Reglas de Desacoplamiento para Futuras GUIs:
+1. **Cero Lógica de Negocio en Comandos:** Los comandos no modifican estados de combate, no validan reglas de negocio ni manipulan la base de datos directamente.
+2. **Cero Dependencia de Bukkit UI en Application Layer:** Los servicios de aplicación (`maurxp.betterdragon.application.*`) no dependen de `Inventory`, `ItemStack`, `Component` complejos ni clases de comandos. Retornan modelos y vistas tipadas puras (`BattleStatusView`, `ArenaSummaryView`, `ArenaDetailView`, `ReloadResult`, `BattleOperationResult`, `LeaderboardPlayerStats`).
+3. **Reutilización Idéntica:** Tanto la CLI de comandos como las futuras GUIs consumen exactamente los mismos Application Services y los mismos chequeos de permisos (`PermissionChecker`).
+4. **Prohibición de Puentes Falsos:** Las futuras GUIs jamás invocarán comandos sintéticos (ej. `player.performCommand("bd start")`).
+
+### 13.3 Servicios de la Capa de Aplicación (`maurxp.betterdragon.application`):
+- **`permission`:**
+  - `CommandPermission`: Enum tipado con nodos canónicos (`betterdragon.use`, `betterdragon.leaderboard`, `betterdragon.stats`, `betterdragon.stats.others`, `betterdragon.claim`, `betterdragon.admin.*`).
+  - `PermissionChecker`: Contrato desacoplado para validar permisos por `CommandSender` o `UUID`.
+  - `BukkitPermissionChecker`: Implementación nativa sobre Paper API que respeta herencia de nodos (`betterdragon.admin` otorga subpermisos admin).
+- **`leaderboard`:**
+  - `LeaderboardApplicationService`: Expone consultas seguras de rankings (`getTopDamage`, `getTopSlayers`, `getTopParticipations`) y estadísticas (`getPlayerStats`, `getPlayerStatsByQuery`) acotadas con límites sanitizados y ejecución 100% asíncrona no bloqueante.
+- **`battle`:**
+  - `BattleAdminService`: Coordina operaciones administrativas sobre batallas activas (`startBattle`, `abortBattle`, `getStatus`, `getAllStatuses`).
+  - `BattleStatusView`: DTO inmutable de lectura que calcula métricas seguras (porcentaje de salud, duración, damager líder) sin exponer mutabilidad de `BattleSession`.
+  - `BattleOperationResult`: Resultado tipado inmutable de operaciones administrativas (`success`, `message`).
+- **`arena`:**
+  - `ArenaQueryService`: Expone consultas inmutables de arenas cargadas en memoria (`listArenas`, `getArenaDetail`) consumiendo `ConfigurationService`.
+  - `ArenaSummaryView` y `ArenaDetailView`: Vistas puras desacopladas de Bukkit con reglas activas y vectores espaciales.
+- **`admin`:**
+  - `AdminApplicationService`: Gestiona la recarga fail-safe y atómica de configuraciones y arenas (`reloadConfiguration`), retornando `ReloadResult` con milisegundos transcurridos.
+- **`reward`:**
+  - `RewardApplicationService`: Facilita la consulta de buzones de reclamo pendientes (`getPendingClaims`) y la entrega explícita (`claimPendingRewards`) delegando en `RewardService` y `ClaimStorage`.
+
+### 13.4 Framework de Comandos (`maurxp.betterdragon.command`):
+- **Comando Raíz y Alias:** `/betterdragon` (canónico) y `/bd` (alias oficial) registrados directamente en el `CommandMap` de Bukkit/Paper durante `onEnable()`.
+- **`CommandRegistry`:** Registro centralizado, despachador y enrutador por nombre canónico y alias.
+- **`CommandContext`:** Contexto inmutable de ejecución (`sender`, `label`, `args`, `isPlayer`, `asPlayer`, helpers de mensajes).
+- **`AllowedSender` (Console Safety):** Define explícitamente si un comando admite `PLAYER_ONLY`, `CONSOLE_ONLY` o `BOTH`. La consola jamás sufre un `ClassCastException`.
+- **`CommandMessages`:** Centralización visual de prefijos, separadores, cabeceras y códigos de color Minecraft sin librerías externas.
+- **Tab Completion Dinámico:** Autocompletado sensible al contexto, filtrado estrictamente por los permisos de capacidad del emisor y sin realizar bloqueos de I/O ni consultas pesadas a SQLite.
+
+### 13.5 Subcomandos Implementados en Fase 3.11:
+1. `/bd help [subcomando]` (`aliases: ayuda, ?`): Ayuda general y detallada con permisos y uso.
+2. `/bd leaderboard [damage|slayers|battles] [límite]` (`aliases: top, lb`): Consulta interactiva no bloqueante de rankings SQLite.
+3. `/bd stats [jugador]` (`aliases: perfil, estadisticas`): Consulta de perfil propio o de terceros (con permiso `betterdragon.stats.others`).
+4. `/bd status [mundo]` (`aliases: estado`): Estado en vivo de la batalla activa (fase, salud, líder de daño).
+5. `/bd start [mundo] [arena] [definición]` (`aliases: spawn, iniciar`): Inicio administrativo seguro con validación de entorno `THE_END`.
+6. `/bd abort [mundo|battleId]` (`aliases: cancel, cancelar, stop`): Cancelación administrativa formal con limpieza de entidades y sesión.
+7. `/bd reload` (`aliases: recargar`): Recarga atómica fail-safe de `config.yml` y `arenas.yml`.
+8. `/bd arena <list|info> [id]` (`aliases: arenas`): Inspección de arenas cargadas y reglas geométricas.
+9. `/bd claim` (`aliases: reclamar, recompensas`): Reclamo manual de ítems pendientes en el buzón de recompensas.
+
+### 13.6 Operaciones Excluidas y Fuera de Alcance:
+- **GUIs de Inventario:** Excluidas en 3.11; la arquitectura queda 100% lista para su implementación sin tocar lógica de negocio.
+- **Edición en Caliente de Arenas:** `/bd arena create/delete/edit` no fue improvisado para evitar corromper `arenas.yml` sin un motor de serialización dedicado.
+- **DragonBattle / EndDragonFight:** Cero integración con el sistema vanilla; BetterDragon mantiene soberanía absoluta.
+- **NMS:** Cero NMS adicional en comandos ni en la capa de aplicación.

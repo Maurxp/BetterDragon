@@ -5,3 +5,44 @@ api-version: '26.1.2'
 author: maurxp
 description: Enterprise-grade Dragon Battle Management Plugin for Paper 26.1.2
 prefix: BetterDragon
+
+permissions:
+  betterdragon.use:
+    description: Permiso base para interactuar con BetterDragon
+    default: true
+  betterdragon.leaderboard:
+    description: Permite consultar el leaderboard global
+    default: true
+  betterdragon.stats:
+    description: Permite consultar las estadísticas de combate propias
+    default: true
+  betterdragon.stats.others:
+    description: Permite consultar las estadísticas de otros jugadores
+    default: op
+  betterdragon.claim:
+    description: Permite reclamar recompensas pendientes
+    default: true
+  betterdragon.admin:
+    description: Permiso administrativo general de BetterDragon
+    default: op
+    children:
+      betterdragon.admin.status: true
+      betterdragon.admin.start: true
+      betterdragon.admin.abort: true
+      betterdragon.admin.reload: true
+      betterdragon.admin.arena: true
+  betterdragon.admin.status:
+    description: Permite consultar el estado de batallas activas
+    default: op
+  betterdragon.admin.start:
+    description: Permite iniciar o forzar una batalla
+    default: op
+  betterdragon.admin.abort:
+    description: Permite abortar o cancelar una batalla activa
+    default: op
+  betterdragon.admin.reload:
+    description: Permite recargar la configuración del plugin
+    default: op
+  betterdragon.admin.arena:
+    description: Permite consultar la configuración de arenas
+    default: op
