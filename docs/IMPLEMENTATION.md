@@ -29,7 +29,9 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 | **3.9–3.9-R2** | **Persistencia SQLite** | Single-Writer Async Worker, almacenamiento durable de claims en SQLite (`betterdragon.db`), versionado v1, restart recovery, protección terminal CLAIMED, no-blocking async, 271 tests. | `COMPLETE` |
 | **3.10** | **Sistema de Leaderboard** | Leaderboard persistente, SQLite schema v2, migración v1 → v2, historial de batallas y participación, estadísticas por UUID, rankings deterministas, transacciones atómicas, idempotencia, BattleResult, persistencia async, 289 tests. | `COMPLETE` |
 | **3.11–3.11-R1** | **Commands / Admin UX** | Arquitectura Application Layer compartida (preparada para futuras GUIs), `/betterdragon` y alias `/bd`, CommandRegistry, permisos granulares, console safety, subcomandos, hardening de hilo en /bd claim con MainThreadDispatcher, 314 tests. | `COMPLETE` |
-| **3.12** | **Hardening Final y Cierre** | Pruebas de estrés, auditoría final de rendimiento y release candidate. | `TODO (Siguiente Fase)` |
+| **3.12** | **Investigación & Formalización** | Investigación de estado del arte (Paper 26.1.2-74), formalización de decisiones de diseño y catálogo de perfiles. | `COMPLETE` |
+| **3.13** | **Perfiles, Atributos & Scaling** | Catálogo múltiple de perfiles (`DragonCatalog`), atributos (`DragonAttributes`), scaling lineal por jugadores (`DragonScalingCalculator`), snapshot de batalla (`BattleConfigurationSnapshot`), selección en `/bd start`, persistencia PDC extendida. | `COMPLETE` |
+| **3.13-R1** | **Consolidación, Corrección & Cierre** | Corrección de `bd-test-lifecycle`, restauración de invariantes en `DragonDefinition`, semántica Opción A en scaling (`enabled: true` sin modo = `LINEAR`), tuning candidates documentados, eliminación de `catch (Throwable)`, validación `definition_id` en sesión, verificación schema v1, 372 tests. | `COMPLETE` |
 
 ---
 
@@ -331,6 +333,35 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 
 ---
 
-## 11. Próxima Fase: Fase 3.12 — Hardening Final y Cierre `[PENDIENTE]`
+## 11. Estado de la Fase 3.13 y 3.13-R1 (Perfiles, Atributos, Scaling & Consolidación) — `COMPLETE`
 
-- **Objetivo Arquitectónico:** Pruebas de estrés, auditoría final de rendimiento, verificación de empaquetado y preparación de release candidate.
+- **Catálogo de Múltiples Perfiles (`maurxp.betterdragon.config`):**
+  - Carga tipada y validación desde `config.yml` (sección `dragons:`), permitiendo múltiples definiciones (`default`, perfiles custom). La hipotética separación física en `dragons.yml` se etiqueta como `[FUTURE]`.
+  - `DragonCatalog`: Contenedor inmutable que almacena definiciones indexadas por ID normalizado en minúsculas, con resolución de `defaultDefinitionId`.
+  - Distinción canónica entre inicio sin perfil (utiliza el default si está presente; falla si no existe) e inicio con perfil explícito (rechaza perfiles desconocidos con error determinista, sin fallback silencioso).
+- **Atributos y Scaling (`maurxp.betterdragon.config` y `scaling`):**
+  - `DragonAttributes`: Record inmutable que encapsula `maxHealth`, `movementSpeed`, `followRange` y `attackDamage`. Invariantes estrictos (vida > 0, valores finitos).
+  - `DragonScalingDefinition`: Configuración de escalado con `enabled`, `mode`, `healthPerPlayer` y `maxHealthMultiplier`.
+  - Semántica Opción A: `enabled: true` sin `mode` asume `ScalingMode.LINEAR`. `enabled: false` asume `NONE`. `enabled: true` con `mode: NONE` se rechaza como configuración inválida.
+  - Valores de tuning: `DEFAULT_HEALTH_PER_PLAYER = 0.25` y `DEFAULT_MAX_HEALTH_MULTIPLIER = 3.0` documentados formalmente como `TUNING_CANDIDATE` (técnicos provisionales no validados experimentalmente).
+  - `DragonScalingCalculator`: Función pura determinista para cálculo de salud efectiva: `BaseHealth * min(maxMult, max(1.0, 1.0 + (N - 1) * healthPerPlayer))`.
+  - `EffectiveDragonStats`: Snapshot inmutable de los atributos reales y cálculo aplicado a la entidad durante la sesión.
+- **Identidad PDC y Ciclo de Vida (`maurxp.betterdragon.entity`):**
+  - Contrato de 4 claves PDC: `betterdragon:managed` (BOOLEAN/BYTE), `betterdragon:battle_id` (STRING), `betterdragon:definition_id` (STRING) y `betterdragon:schema_version` (INTEGER = 1).
+  - `DragonPdcHandler.validateDragonForSession()`: Validación cruzada estricta que exige coincidencia tanto de `battle_id` como de `definition_id` contra el snapshot de la sesión activa, impidiendo colisiones entre perfiles.
+  - Validación de versión de esquema: rechaza versiones futuras (`> CURRENT_SCHEMA_VERSION = 1`) o inválidas (`<= 0`). Soporte de lectura de entidades legacy sin versión asumiendo versión 1.
+  - Actualización de `BetterDragonPlugin.runLifecycleVerification()`: verificación exhaustiva de las 4 claves PDC y consistencia con la sesión activa, eliminando aserciones obsoletas.
+- **Spawner y Aplicación de Atributos (`maurxp.betterdragon.entity.DragonSpawner`):**
+  - Eliminación total de silenciamiento (`catch (Throwable ignored)`). Reemplazado por captura tipada `catch (Exception | LinkageError e)` y emisión de advertencias estructuradas mediante `java.util.logging.Logger`.
+  - Aplicación de `EffectiveDragonStats` sobre atributos Paper API (`MAX_HEALTH`, salud actual, `MOVEMENT_SPEED`, `FOLLOW_RANGE`, `ATTACK_DAMAGE`).
+- **Comandos y Administración (`maurxp.betterdragon.application.battle` y `command`):**
+  - `/betterdragon start [mundo] [arena] [perfil]`: Soporta selección de perfil con autocompletado en tab-completion desde el catálogo.
+  - `/betterdragon status`: Informa el perfil/definición activo de la batalla actual.
+  - Inmutabilidad de snapshot: `BattleConfigurationSnapshot` aísla batallas en curso frente a `/betterdragon reload`.
+- **Pruebas Automatizadas y Cobertura:**
+  - Cobertura completa de invariantes en `DragonDefinitionTest`: IDs válidos/inválidos, normalización, fases duplicadas, umbrales no decrecientes, umbrales duplicados, referencias a habilidades inexistentes, fases vacías, inmutabilidad de colecciones.
+  - Suite dedicada `DragonScalingDefinitionTest`: 10 pruebas exhaustivas de todos los casos de borde de scaling.
+  - Validación en `DragonConfigurationLoaderTest`: Semántica Opción A, catálogo múltiple, defaults y casos de error.
+  - Pruebas en `DragonPdcHandlerTest`: Mismatch de `definition_id`, versiones de esquema no soportadas o inválidas.
+  - Pruebas en `DragonCommandSelectionTest`: Selección explícita, fallback a default, rechazo de desconocido y tab completion.
+  - **Total de pruebas del proyecto:** 372 pruebas ejecutadas, 0 fallos, 0 errores, 0 omitidos.

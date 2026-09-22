@@ -97,7 +97,7 @@ public class StatusSubCommand implements SubCommand {
     private void renderStatus(CommandContext context, BattleStatusView status) {
         context.sendRaw(CommandMessages.header("Batalla en " + status.worldName()));
         context.sendRaw(" §8» §7ID: §8" + status.battleId());
-        context.sendRaw(" §8» §7Estado: §e" + status.state() + " §7(Arena: §f" + status.arenaId() + "§7)");
+        context.sendRaw(" §8» §7Estado: §e" + status.state() + " §7(Arena: §f" + status.arenaId() + "§7, Perfil: §f" + status.dragonDefinitionId() + "§7)");
 
         String healthBar = String.format("§a%,.0f§7/§a%,.0f §8(§e%.1f%%§8)",
                 status.currentHealth(), status.maxHealth(), status.getHealthPercentage() * 100.0);

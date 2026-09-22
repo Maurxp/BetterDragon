@@ -115,13 +115,15 @@ public class BattleAdminService {
             return BattleOperationResult.failure("Ya existe una batalla activa en el mundo " + world.getName() + ".");
         }
 
-        String targetDefinition = (definitionId != null && !definitionId.isBlank()) ? definitionId.trim() : "default";
+        String targetDefinition = (definitionId != null && !definitionId.isBlank()) ? definitionId.trim() : null;
         String targetArena = (arenaId != null && !arenaId.isBlank()) ? arenaId.trim() : "default";
 
         try {
             BattleSession session = battleManager.startBattle(world, null, targetDefinition, targetArena);
             return BattleOperationResult.success(
-                    "Batalla iniciada exitosamente en el mundo " + world.getName() + " (Arena: " + targetArena + ").",
+                    "Batalla iniciada exitosamente en el mundo " + world.getName()
+                            + " (Arena: " + targetArena
+                            + ", Perfil: " + session.getConfigSnapshot().dragonDefinition().id() + ").",
                     session.getBattleId()
             );
         } catch (IllegalArgumentException | IllegalStateException e) {
@@ -130,6 +132,13 @@ public class BattleAdminService {
             logger.log(Level.SEVERE, "[BetterDragon] Error inesperado al iniciar batalla vía comando: " + e.getMessage(), e);
             return BattleOperationResult.failure("Error interno al iniciar batalla: " + e.getMessage());
         }
+    }
+
+    /**
+     * Retorna la lista de identificadores de perfiles de dragón registrados en el catálogo activo.
+     */
+    public List<String> getAvailableDragonDefinitions() {
+        return List.copyOf(configService.getDragonCatalog().getAllDefinitions().keySet());
     }
 
     /**
@@ -217,7 +226,7 @@ public class BattleAdminService {
                         maxHealth = dragon.getAttribute(Attribute.MAX_HEALTH).getValue();
                     }
                 }
-            } catch (Throwable ignored) {
+            } catch (Exception | LinkageError ignored) {
             }
         }
 

@@ -38,12 +38,12 @@
 ## 2. Decisiones Arquitectónicas Firmes (Decisions)
 
 ### DEC-01: Control de Atributos Nativos mediante Paper API
-* **Status:** `DECISION`
+* **Status:** `DECISION (CONSOLIDADA / IMPLEMENTADA EN FASE 3.13)`
 * **Evidence:** `Paper Javadoc: LivingEntity#getAttribute(Attribute)` (`SOURCE_CODE / HIGH`).
-* **Rationale:** Permite calibrar la vida máxima (`Attribute.MAX_HEALTH`), velocidad (`MOVEMENT_SPEED`) y rango de seguimiento (`FOLLOW_RANGE`) sin recurrir a paquetes internos de servidor.
-* **Consequences:** Soporte transparente de perfiles de atributos cargados desde configuración.
-* **Validation Needed:** Comprobar límites superiores seguros para no causar tirones en el hilo principal (`EXP-001`, `EXP-002`).
-* **Implementation Target:** Fase 3.13.
+* **Rationale:** Permite calibrar la vida máxima (`Attribute.MAX_HEALTH`), velocidad (`MOVEMENT_SPEED`), rango de seguimiento (`FOLLOW_RANGE`) y daño de ataque (`ATTACK_DAMAGE`) sin recurrir a paquetes internos de servidor.
+* **Consequences:** Soporte transparente de perfiles de atributos cargados desde configuración (`DragonAttributes`), aplicados de forma segura en `DragonSpawner`.
+* **Validation Needed:** Validado con tests unitarios en `DragonAttributesTest` y `DragonSpawnerTest`.
+* **Implementation Target:** Fase 3.13 (Completada).
 
 ### DEC-02: Rechazo Formal del Escalado de Modelo vía `Attribute.SCALE`
 * **Status:** `REJECT`
@@ -54,12 +54,11 @@
 * **Implementation Target:** N/A (Descartado).
 
 ### DEC-03: Catálogo Objetivo de Múltiples Definiciones de Dragón
-* **Status:** `DECISION`
-* **Evidence:** `ConfigurationLoader.java:265-267` (`SOURCE_CODE / HIGH`).
-* **Rationale:** Actualmente el código solo carga un único dragón (el "default" o el primer key encontrado). El diseño objetivo requiere soportar un catálogo `Map<String, DragonDefinition>` para permitir múltiples variantes de jefe por arena o comando.
-* **Consequences:** Se requiere evolucionar `ConfigurationLoader` y `BattleConfigurationSnapshot` para almacenar y consultar perfiles por identificador.
-* **Validation Needed:** Pruebas unitarias de carga de múltiples secciones en `dragons.yml`.
-* **Implementation Target:** Fase 3.13.
+* **Status:** `DECISION (CONSOLIDADA / IMPLEMENTADA EN FASE 3.13)`
+* **Rationale:** Soporta un catálogo inmutable `DragonCatalog` de múltiples definiciones cargadas desde `config.yml` (sección `dragons:`), permitiendo variantes de jefe seleccionables por comando (`/bd start [mundo] [arena] [perfil]`) o asignadas por configuración, con congelación inmutable en `BattleConfigurationSnapshot`. La separación física a un archivo dedicado `dragons.yml` se clasifica como propuesta arquitectónica `FUTURE`.
+* **Consequences:** Superado el modelo de perfil único o fallback al primer key YAML. Soporte de validación de identificadores, nombres legibles y aislamiento ante recargas (`/bd reload`).
+* **Validation Needed:** Validado con tests unitarios en `DragonCatalogTest`, `DragonConfigurationLoaderTest` y `DragonBattleSnapshotReloadTest`.
+* **Implementation Target:** Fase 3.13 / 3.13-R1 (Completada).
 
 ### DEC-04: Atribución de Victoria y Reparto Proporcional de Botín
 * **Status:** `DECISION (CONSOLIDADA)`
@@ -74,12 +73,12 @@
 ## 3. Mecánicas Candidatas en Diseño (Candidates)
 
 ### CAND-01: Escalado de Salud por Jugador al Inicio de Batalla (*Battle-Start Scaling*)
-* **Status:** `CANDIDATE`
+* **Status:** `DECISION (IMPLEMENTADA EN FASE 3.13)`
 * **Evidence:** Literatura de diseño de incursiones y MMO raid boss design (`DOCUMENTED / MEDIUM`).
-* **Rationale:** Ajustar la salud del dragón al momento de spawnear basándose en la cantidad de participantes presentes en la arena. Evita los problemas de recálculo dinámico en vivo si jugadores mueren o se desconectan.
-* **Consequences:** Fórmula candidata: $\text{Salud} = \text{Base} \times \min(\text{Cap}, 1.0 + (N_{\text{activos}} - 1) \times \alpha)$.
-* **Validation Needed:** Determinar el valor de $\alpha$ y $\text{Cap}$ mediante pruebas de juego (`EXP-008 — PENDING`).
-* **Implementation Target:** Fase 3.13.
+* **Rationale:** Ajustar la salud del dragón al momento de spawnear basándose en la cantidad de participantes presentes en la arena geométrica al iniciar la batalla. Evita los problemas de recálculo dinámico en vivo si jugadores mueren o se desconectan.
+* **Consequences:** Fórmula implementada en pure-function `DragonScalingCalculator`: $\text{Salud} = \text{Base} \times \min(\text{Cap}, \max(1.0, 1.0 + (N_{\text{activos}} - 1) \times \alpha))$. Parámetros `health-per-player` ($\alpha$) y `max-multiplier` ($\text{Cap}$) configurables por perfil de dragón.
+* **Validation Needed:** La implementación técnica de la fórmula fue validada exhaustivamente mediante `DragonScalingCalculatorTest` con casos de borde (0 jugadores, 1 jugador, N jugadores, capping superior y modo NONE). Los valores de tuning por defecto (`health-per-player: 0.25`, `max-multiplier: 3.0`) continúan clasificados como candidatos provisionales (`TUNING_CANDIDATE`) y requieren validación empírica mediante playtesting antes de considerarse balance definitivo.
+* **Implementation Target:** Fase 3.13 (Completada).
 
 ### CAND-02: Mitigación de Explosiones de Camas y Anclas de Respawn
 * **Status:** `CANDIDATE`

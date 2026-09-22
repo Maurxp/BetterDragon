@@ -191,6 +191,65 @@ public class ConfigurationService {
     }
 
     /**
+     * Retorna el catálogo de dragones activo.
+     *
+     * @return DragonCatalog activo
+     */
+    public DragonCatalog getDragonCatalog() {
+        return activeConfig.dragonCatalog();
+    }
+
+    /**
+     * Busca una definición de dragón por su ID en el catálogo activo.
+     *
+     * @param definitionId identificador de la definición
+     * @return Optional con la definición si existe
+     */
+    public Optional<DragonDefinition> getDragonDefinition(String definitionId) {
+        return activeConfig.dragonCatalog().getDefinition(definitionId);
+    }
+
+    /**
+     * Retorna la definición de dragón por defecto del catálogo activo.
+     *
+     * @return DragonDefinition default
+     */
+    public DragonDefinition getDefaultDragonDefinition() {
+        return activeConfig.dragonCatalog().getDefaultDefinition();
+    }
+
+    /**
+     * Genera un snapshot inmutable para una nueva sesión de batalla con arena, definición y recuento de jugadores explícitos.
+     *
+     * @param arena        definición de arena a congelar
+     * @param definitionId identificador de la definición de dragón (opcional, null busca default)
+     * @param playerCount  cantidad de jugadores observados/elegibles para escalado determinista
+     * @return nuevo snapshot congelado con la arena, definición y effectiveStats calculados
+     */
+    public BattleConfigurationSnapshot createBattleSnapshot(ArenaDefinition arena, String definitionId, int playerCount) {
+        Objects.requireNonNull(arena, "La definición de arena no puede ser nula");
+        DragonDefinition dragonDef;
+        if (definitionId != null && !definitionId.isBlank()) {
+            dragonDef = getDragonDefinition(definitionId).orElseThrow(() ->
+                    new IllegalArgumentException("La definición de dragón solicitada '" + definitionId + "' no existe en el catálogo activo."));
+        } else {
+            dragonDef = activeConfig.dragonCatalog().defaultDefinition().orElseThrow(() ->
+                    new IllegalStateException("No existe una definición de dragón 'default' configurada en el catálogo activo."));
+        }
+
+        EffectiveDragonStats effectiveStats = DragonScalingCalculator.calculate(dragonDef, playerCount);
+
+        return new BattleConfigurationSnapshot(
+                activeConfig.portalEnabled(),
+                activeConfig.debugLogging(),
+                dragonDef,
+                arena,
+                activeConfig.rewardConfig(),
+                effectiveStats
+        );
+    }
+
+    /**
      * Genera un snapshot inmutable para una nueva sesión de batalla asociando la arena indicada.
      *
      * @param arenaId identificador de la arena a congelar
@@ -209,12 +268,16 @@ public class ConfigurationService {
      */
     public BattleConfigurationSnapshot createBattleSnapshot(ArenaDefinition arena) {
         Objects.requireNonNull(arena, "La definición de arena no puede ser nula");
+        DragonDefinition dragonDef = activeConfig.dragonCatalog().defaultDefinition()
+                .orElseGet(() -> activeConfig.dragonDefinition());
+        EffectiveDragonStats effectiveStats = DragonScalingCalculator.calculate(dragonDef, 1);
         return new BattleConfigurationSnapshot(
                 activeConfig.portalEnabled(),
                 activeConfig.debugLogging(),
-                activeConfig.dragonDefinition(),
+                dragonDef,
                 arena,
-                activeConfig.rewardConfig()
+                activeConfig.rewardConfig(),
+                effectiveStats
         );
     }
 

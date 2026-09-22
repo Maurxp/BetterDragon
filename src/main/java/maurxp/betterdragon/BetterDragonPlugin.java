@@ -530,20 +530,39 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
                 }
                 getLogger().info("[LIFECYCLE-CHECK-2] Dragón físico encontrado con UUID: " + dragon.getUniqueId());
 
-                // C. Verificar PDC (Fase 3.3-R1: solo managed=true y battle_id)
+                // C. Verificar PDC (Fase 3.13-R1: managed=true, battle_id, definition_id y schema_version)
                 if (!DragonPdcHandler.isBetterDragon(dragon)) {
                     getLogger().severe("[LIFECYCLE-TEST-FAIL] El dragón no tiene la firma PDC válida de BetterDragon.");
                     return;
                 }
                 var pdc = dragon.getPersistentDataContainer();
-                if (pdc.has(BetterDragonKeys.DEFINITION_ID, org.bukkit.persistence.PersistentDataType.STRING) ||
-                        pdc.has(BetterDragonKeys.SCHEMA_VERSION, org.bukkit.persistence.PersistentDataType.INTEGER)) {
-                    getLogger().severe(
-                            "[LIFECYCLE-TEST-FAIL] El PDC contiene claves innecesarias escritas durante el spawn (definition_id o schema_version).");
+                if (!pdc.has(BetterDragonKeys.DEFINITION_ID, org.bukkit.persistence.PersistentDataType.STRING)) {
+                    getLogger().severe("[LIFECYCLE-TEST-FAIL] El PDC no contiene la clave obligatoria definition_id.");
                     return;
                 }
-                getLogger().info("[LIFECYCLE-CHECK-3] Firma PDC mínima verificada (solo managed=true y battle_id="
-                        + identity.battleId() + ", sin definition_id ni schema_version)");
+                String definitionId = pdc.get(BetterDragonKeys.DEFINITION_ID, org.bukkit.persistence.PersistentDataType.STRING);
+                String expectedDefinitionId = session.getConfigSnapshot() != null && session.getConfigSnapshot().dragonDefinition() != null
+                        ? session.getConfigSnapshot().dragonDefinition().id()
+                        : identity.definitionId();
+                if (!expectedDefinitionId.equalsIgnoreCase(definitionId)) {
+                    getLogger().severe("[LIFECYCLE-TEST-FAIL] definition_id en PDC (" + definitionId
+                            + ") no coincide con el perfil esperado (" + expectedDefinitionId + ").");
+                    return;
+                }
+
+                if (!pdc.has(BetterDragonKeys.SCHEMA_VERSION, org.bukkit.persistence.PersistentDataType.INTEGER)) {
+                    getLogger().severe("[LIFECYCLE-TEST-FAIL] El PDC no contiene la clave obligatoria schema_version.");
+                    return;
+                }
+                int schemaVersion = pdc.get(BetterDragonKeys.SCHEMA_VERSION, org.bukkit.persistence.PersistentDataType.INTEGER);
+                if (schemaVersion != DragonPdcHandler.CURRENT_SCHEMA_VERSION) {
+                    getLogger().severe("[LIFECYCLE-TEST-FAIL] schema_version en PDC (" + schemaVersion
+                            + ") no coincide con la versión soportada (" + DragonPdcHandler.CURRENT_SCHEMA_VERSION + ").");
+                    return;
+                }
+
+                getLogger().info("[LIFECYCLE-CHECK-3] Firma PDC completa verificada (managed=true, battle_id="
+                        + identity.battleId() + ", definition_id=" + definitionId + ", schema_version=" + schemaVersion + ")");
 
                 // D. Verificar independencia de DragonBattle
                 getLogger().info(

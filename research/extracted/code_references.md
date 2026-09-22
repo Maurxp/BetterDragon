@@ -57,15 +57,15 @@ Fuente interna verificable: `src/main/java/maurxp/betterdragon/`
 
 ### 3.1 Claves PDC Persistidas vs Reservadas
 * **Archivo:** [battle/DragonPdcHandler.java](file:///c:/Users/amaur/Desktop/SMP-Plugins/SMP-BetterDragon/BetterDragon/src/main/java/maurxp/betterdragon/battle/DragonPdcHandler.java)
-* **Líneas:** 43–47
-* **Comportamiento Verificado:**
+* **Líneas Históricas (3.12):** 43–47
+* **Comportamiento Observado en 3.12-R1:**
   ```java
   PersistentDataContainer pdc = dragon.getPersistentDataContainer();
   pdc.set(BetterDragonKeys.MANAGED, PersistentDataType.BOOLEAN, true);
   pdc.set(BetterDragonKeys.BATTLE_ID, PersistentDataType.STRING, identity.battleId().asString());
   // Phase 3.3-R1: definition_id y schema_version se reservan para fases futuras y NO se escriben en el spawn.
   ```
-* **Estado Actual:** Solo `managed` y `battle_id` son escritos físicamente en el PDC en la versión actual; `definition_id` y `schema_version` están reservados para la Fase 3.13+.
+* **Estatus de Auditoría:** `[HISTÓRICO 3.12-R1 | RESUELTO EN 3.13 / 3.13-R1]`. A partir de la Fase 3.13, las 4 claves (`managed`, `battle_id`, `definition_id` y `schema_version = 1`) son persistidas síncronamente en el spawn y validadas contra la sesión activa.
 
 ### 3.2 Registro de Participantes Confinado al Daño Válido
 * **Archivo:** [combat/CombatRuntime.java](file:///c:/Users/amaur/Desktop/SMP-Plugins/SMP-BetterDragon/BetterDragon/src/main/java/maurxp/betterdragon/combat/CombatRuntime.java)
@@ -75,17 +75,18 @@ Fuente interna verificable: `src/main/java/maurxp/betterdragon/`
 
 ### 3.3 Selección de Definición Única en ConfigurationLoader
 * **Archivo:** [config/ConfigurationLoader.java](file:///c:/Users/amaur/Desktop/SMP-Plugins/SMP-BetterDragon/BetterDragon/src/main/java/maurxp/betterdragon/config/ConfigurationLoader.java)
-* **Líneas:** 265–267
-* **Comportamiento Verificado:**
+* **Líneas Históricas (3.12):** 265–267
+* **Comportamiento Observado en 3.12-R1:**
   ```java
   String targetDragonKey = dragonsSec.contains("default")
           ? "default"
           : dragonsSec.getKeys(false).stream().findFirst().orElse(null);
   ```
-* **Estado Actual:** El cargador resuelve un único `DragonDefinition` para la sesión. El soporte para un catálogo completo `Map<String, DragonDefinition>` es objetivo de la Fase 3.13.
+* **Estatus de Auditoría:** `[HISTÓRICO 3.12-R1 | RESUELTO EN 3.13 / 3.13-R1]`. En la Fase 3.13 se eliminó el fallback al primer key. `ConfigurationLoader` ahora construye un catálogo completo `DragonCatalog` con validación estricta de múltiples definiciones bajo `config.yml: dragons:`.
 
 ### 3.4 Coordenadas de Spawn por Defecto en DragonSpawner
 * **Archivo:** [battle/DragonSpawner.java](file:///c:/Users/amaur/Desktop/SMP-Plugins/SMP-BetterDragon/BetterDragon/src/main/java/maurxp/betterdragon/battle/DragonSpawner.java)
-* **Líneas:** 27–29 y 50
-* **Comportamiento Verificado:**
-  Si no se pasa una `Location` explícita, `DragonSpawner` recurre a constantes estáticas (`0.5, 128.0, 0.5`). La derivación formal de spawn y podio desde `ArenaDefinition` está planificada para la Fase 3.13.
+* **Líneas Históricas (3.12):** 27–29 y 50
+* **Comportamiento Observado en 3.12-R1:**
+  Si no se pasaba una `Location` explícita, `DragonSpawner` recurría a constantes estáticas (`0.5, 128.0, 0.5`).
+* **Estatus de Auditoría:** `[HISTÓRICO 3.12-R1 | RESUELTO EN 3.13 / 3.13-R1]`. Las coordenadas mágicas fueron eliminadas. El spawn y podio se derivan estrictamente de la geometría configurada en `ArenaDefinition` (`center()` y `podium()`).

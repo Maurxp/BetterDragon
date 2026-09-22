@@ -14,84 +14,191 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/**
- * Pruebas unitarias para {@link DragonDefinition}.
- *
- * @author maurxp
- */
+@DisplayName("Pruebas Unitarias de DragonDefinition (Fase 3.13 / 3.13-R1)")
 class DragonDefinitionTest {
 
-    private final AbilityDefinition roar = new AbilityDefinition(
-            "roar", AbilityTrigger.ON_PHASE_ENTER, 0,
-            TargetSelectorType.ALL_IN_ARENA, EffectOriginType.DRAGON_HEAD, AbilityEffectType.SOUND);
-
-    private final AbilityDefinition sweep = new AbilityDefinition(
-            "sweep", AbilityTrigger.PERIODIC, 100,
-            TargetSelectorType.NEAREST_PLAYER, EffectOriginType.DRAGON_BODY, AbilityEffectType.KNOCKBACK);
-
     @Test
-    @DisplayName("Construcción nominal con fases ordenadas e integridad de habilidades")
+    @DisplayName("Creación exitosa con parámetros válidos")
     void testValidDragonDefinition() {
-        List<PhaseDefinition> phases = List.of(
-                new PhaseDefinition("p1", 0, 1.0, List.of("roar")),
-                new PhaseDefinition("p2", 1, 0.5, List.of("sweep"))
+        PhaseDefinition p1 = new PhaseDefinition("p1", 0, 1.0, List.of());
+        PhaseDefinition p2 = new PhaseDefinition("p2", 1, 0.5, List.of());
+        DragonAttributes attrs = new DragonAttributes(600.0, 0.35, 64.0, 15.0);
+        DragonScalingDefinition scaling = new DragonScalingDefinition(true, ScalingMode.LINEAR, 0.25, 4.0);
+
+        DragonDefinition def = new DragonDefinition(
+                "elder_dragon",
+                "Dragón Anciano",
+                attrs,
+                scaling,
+                List.of(p1, p2),
+                Map.of()
         );
-        Map<String, AbilityDefinition> abilities = Map.of("roar", roar, "sweep", sweep);
 
-        DragonDefinition def = new DragonDefinition("default", phases, abilities);
-
-        assertEquals("default", def.id());
+        assertEquals("elder_dragon", def.id());
+        assertEquals("Dragón Anciano", def.displayName());
+        assertEquals(600.0, def.attributes().maxHealth());
+        assertTrue(def.scaling().enabled());
+        assertEquals(ScalingMode.LINEAR, def.scaling().mode());
         assertEquals(2, def.phases().size());
-        assertEquals(2, def.abilities().size());
     }
 
     @Test
-    @DisplayName("Rechazo de identificadores de fase duplicados")
-    void testDuplicatePhaseIds() {
-        List<PhaseDefinition> phases = List.of(
-                new PhaseDefinition("phase_same", 0, 1.0),
-                new PhaseDefinition("phase_same", 1, 0.5)
-        );
+    @DisplayName("Rechaza IDs nulos, vacíos o con caracteres inválidos")
+    void testInvalidDragonIds() {
+        List<PhaseDefinition> phases = List.of(new PhaseDefinition("p1", 0, 1.0, List.of()));
+        DragonAttributes attrs = DragonAttributes.defaults();
+        DragonScalingDefinition scaling = DragonScalingDefinition.defaults();
 
-        assertThrows(IllegalArgumentException.class,
-                () -> new DragonDefinition("default", phases, Map.of()));
+        assertThrows(NullPointerException.class, () ->
+                new DragonDefinition(null, "Name", attrs, scaling, phases, Map.of()));
+        assertThrows(IllegalArgumentException.class, () ->
+                new DragonDefinition("", "Name", attrs, scaling, phases, Map.of()));
+        assertThrows(IllegalArgumentException.class, () ->
+                new DragonDefinition("   ", "Name", attrs, scaling, phases, Map.of()));
+        assertThrows(IllegalArgumentException.class, () ->
+                new DragonDefinition("dragon with spaces", "Name", attrs, scaling, phases, Map.of()));
+        assertThrows(IllegalArgumentException.class, () ->
+                new DragonDefinition("dragon:colon", "Name", attrs, scaling, phases, Map.of()));
+        assertThrows(IllegalArgumentException.class, () ->
+                new DragonDefinition("dragon.dot", "Name", attrs, scaling, phases, Map.of()));
     }
 
     @Test
-    @DisplayName("Rechazo de thresholds no estrictamente decrecientes")
-    void testNonDecreasingThresholds() {
-        // Thresholds iguales (1.0 y 1.0)
-        List<PhaseDefinition> equalThresholds = List.of(
-                new PhaseDefinition("p1", 0, 1.0),
-                new PhaseDefinition("p2", 1, 1.0)
+    @DisplayName("Normaliza ID a minúsculas y sin espacios laterales")
+    void testIdNormalization() {
+        PhaseDefinition p1 = new PhaseDefinition("p1", 0, 1.0, List.of());
+        DragonDefinition def = new DragonDefinition(
+                "  NIGHTMARE_DRAGON  ",
+                null,
+                DragonAttributes.defaults(),
+                DragonScalingDefinition.defaults(),
+                List.of(p1),
+                Map.of()
         );
-        assertThrows(IllegalArgumentException.class,
-                () -> new DragonDefinition("default", equalThresholds, Map.of()));
 
-        // Thresholds crecientes (0.50 y 0.75)
-        List<PhaseDefinition> ascendingThresholds = List.of(
-                new PhaseDefinition("p1", 0, 0.50),
-                new PhaseDefinition("p2", 1, 0.75)
-        );
-        assertThrows(IllegalArgumentException.class,
-                () -> new DragonDefinition("default", ascendingThresholds, Map.of()));
+        assertEquals("nightmare_dragon", def.id());
     }
 
     @Test
-    @DisplayName("Rechazo de habilidades referenciadas que no existen en el catálogo")
-    void testReferencedMissingAbility() {
-        List<PhaseDefinition> phases = List.of(
-                new PhaseDefinition("p1", 0, 1.0, List.of("missing_ability"))
-        );
-
-        assertThrows(IllegalArgumentException.class,
-                () -> new DragonDefinition("default", phases, Map.of("roar", roar)));
+    @DisplayName("DragonDefinition.defaults provee valores por defecto coherentes")
+    void testDefaults() {
+        DragonDefinition def = DragonDefinition.defaults();
+        assertEquals("default", def.id());
+        assertEquals(200.0, def.attributes().maxHealth());
+        assertFalse(def.scaling().enabled());
+        assertEquals(4, def.phases().size());
     }
 
     @Test
-    @DisplayName("Rechazo de lista de fases vacía")
-    void testEmptyPhases() {
-        assertThrows(IllegalArgumentException.class,
-                () -> new DragonDefinition("default", List.of(), Map.of()));
+    @DisplayName("Inmutabilidad: phases() y abilities() retornan vistas no modificables")
+    void testImmutability() {
+        DragonDefinition def = DragonDefinition.defaults();
+        assertThrows(UnsupportedOperationException.class, () -> def.phases().add(null));
+        assertThrows(UnsupportedOperationException.class, () -> def.abilities().put("test", null));
+    }
+
+    @Test
+    @DisplayName("Invariante: IDs de phase duplicados deben lanzar IllegalArgumentException")
+    void testDuplicatePhaseIdsShouldThrow() {
+        PhaseDefinition p1 = new PhaseDefinition("duplicate_id", 0, 1.0, List.of());
+        PhaseDefinition p2 = new PhaseDefinition("duplicate_id", 1, 0.5, List.of());
+
+        assertThrows(IllegalArgumentException.class, () ->
+                new DragonDefinition("test_dragon", List.of(p1, p2), Map.of()));
+    }
+
+    @Test
+    @DisplayName("Invariante: thresholds no decrecientes deben lanzar IllegalArgumentException")
+    void testNonDecreasingThresholdsShouldThrow() {
+        PhaseDefinition p1 = new PhaseDefinition("p1", 0, 0.5, List.of());
+        PhaseDefinition p2 = new PhaseDefinition("p2", 1, 0.75, List.of());
+
+        assertThrows(IllegalArgumentException.class, () ->
+                new DragonDefinition("test_dragon", List.of(p1, p2), Map.of()));
+    }
+
+    @Test
+    @DisplayName("Invariante: thresholds idénticos duplicados deben lanzar IllegalArgumentException")
+    void testDuplicateThresholdsShouldThrow() {
+        PhaseDefinition p1 = new PhaseDefinition("p1", 0, 0.5, List.of());
+        PhaseDefinition p2 = new PhaseDefinition("p2", 1, 0.5, List.of());
+
+        assertThrows(IllegalArgumentException.class, () ->
+                new DragonDefinition("test_dragon", List.of(p1, p2), Map.of()));
+    }
+
+    @Test
+    @DisplayName("Invariante: referencia a habilidad inexistente debe lanzar IllegalArgumentException")
+    void testMissingReferencedAbilityShouldThrow() {
+        PhaseDefinition p1 = new PhaseDefinition("p1", 0, 1.0, List.of("unregistered_ability"));
+
+        assertThrows(IllegalArgumentException.class, () ->
+                new DragonDefinition("test_dragon", List.of(p1), Map.of()));
+    }
+
+    @Test
+    @DisplayName("Invariante: lista de phases vacía debe lanzar IllegalArgumentException")
+    void testEmptyPhasesShouldThrow() {
+        assertThrows(IllegalArgumentException.class, () ->
+                new DragonDefinition("test_dragon", List.of(), Map.of()));
+    }
+
+    @Test
+    @DisplayName("Invariante: phases o abilities nulas deben lanzar NullPointerException")
+    void testNullPhasesOrAbilitiesShouldThrow() {
+        assertThrows(NullPointerException.class, () ->
+                new DragonDefinition("test_dragon", null, Map.of()));
+        assertThrows(NullPointerException.class, () ->
+                new DragonDefinition("test_dragon", List.of(new PhaseDefinition("p1", 0, 1.0, List.of())), null));
+    }
+
+    @Test
+    @DisplayName("Invariante: construcción válida con catálogo de abilities referenciadas")
+    void testValidConstructionWithAbilities() {
+        AbilityDefinition flame = new AbilityDefinition(
+                "flame_burst",
+                AbilityTrigger.PERIODIC,
+                100L,
+                TargetSelectorType.NEAREST_PLAYER,
+                EffectOriginType.DRAGON_HEAD,
+                AbilityEffectType.DAMAGE,
+                Map.of("damage", 10.0)
+        );
+
+        PhaseDefinition p1 = new PhaseDefinition("p1", 0, 1.0, List.of("flame_burst"));
+        PhaseDefinition p2 = new PhaseDefinition("p2", 1, 0.5, List.of("flame_burst"));
+
+        DragonDefinition def = new DragonDefinition(
+                "elemental_dragon",
+                "Dragón Elemental",
+                new DragonAttributes(400.0),
+                DragonScalingDefinition.disabled(),
+                List.of(p1, p2),
+                Map.of("flame_burst", flame)
+        );
+
+        assertEquals(2, def.phases().size());
+        assertEquals(1, def.abilities().size());
+        assertTrue(def.abilities().containsKey("flame_burst"));
+        assertEquals(flame, def.abilities().get("flame_burst"));
+    }
+
+    @Test
+    @DisplayName("Fallback: attributes o scaling nulos se inicializan con defaults")
+    void testFallbackWhenAttributesOrScalingNull() {
+        PhaseDefinition p1 = new PhaseDefinition("p1", 0, 1.0, List.of());
+        DragonDefinition def = new DragonDefinition(
+                "fallback_dragon",
+                null,
+                null,
+                null,
+                List.of(p1),
+                Map.of()
+        );
+
+        assertNotNull(def.attributes());
+        assertEquals(DragonAttributes.DEFAULT_MAX_HEALTH, def.attributes().maxHealth());
+        assertNotNull(def.scaling());
+        assertFalse(def.scaling().enabled());
     }
 }

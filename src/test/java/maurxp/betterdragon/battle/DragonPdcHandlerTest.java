@@ -2,6 +2,7 @@ package maurxp.betterdragon.battle;
 
 import maurxp.betterdragon.battle.model.BattleId;
 import maurxp.betterdragon.battle.model.DragonIdentity;
+import maurxp.betterdragon.config.BattleConfigurationSnapshot;
 import maurxp.betterdragon.util.BetterDragonKeys;
 import org.bukkit.NamespacedKey;
 import org.bukkit.entity.EnderDragon;
@@ -37,11 +38,11 @@ class DragonPdcHandlerTest {
 
         DragonPdcHandler.applyIdentity(dragon, identity);
 
-        // Fase 3.3-R1: Solo se escriben MANAGED y BATTLE_ID
+        // Fase 3.13: Se escriben MANAGED, BATTLE_ID, DEFINITION_ID y SCHEMA_VERSION
         assertTrue(pdc.has(BetterDragonKeys.MANAGED, PersistentDataType.BOOLEAN));
         assertTrue(pdc.has(BetterDragonKeys.BATTLE_ID, PersistentDataType.STRING));
-        assertFalse(pdc.has(BetterDragonKeys.DEFINITION_ID, PersistentDataType.STRING));
-        assertFalse(pdc.has(BetterDragonKeys.SCHEMA_VERSION, PersistentDataType.INTEGER));
+        assertTrue(pdc.has(BetterDragonKeys.DEFINITION_ID, PersistentDataType.STRING));
+        assertTrue(pdc.has(BetterDragonKeys.SCHEMA_VERSION, PersistentDataType.INTEGER));
 
         Optional<DragonIdentity> extractedOpt = DragonPdcHandler.extractIdentity(dragon);
         assertTrue(extractedOpt.isPresent());
@@ -49,8 +50,7 @@ class DragonPdcHandlerTest {
         DragonIdentity extracted = extractedOpt.get();
         assertEquals(entityId, extracted.entityUniqueId());
         assertEquals(battleId, extracted.battleId());
-        // Defaults automáticos si no están presentes en el PDC
-        assertEquals("default", extracted.definitionId());
+        assertEquals("elder_dragon", extracted.definitionId());
         assertEquals(1, extracted.schemaVersion());
         assertTrue(DragonPdcHandler.isBetterDragon(dragon));
     }
@@ -233,6 +233,61 @@ class DragonPdcHandlerTest {
         // Argumentos nulos
         assertFalse(DragonPdcHandler.validateDragonForSession(null, session));
         assertFalse(DragonPdcHandler.validateDragonForSession(dragon, null));
+    }
+
+    @Test
+    @DisplayName("validateDragonForSession rechaza entidad con definition_id que no coincide con el snapshot de la sesión")
+    void testValidateDragonForSessionRejectsMismatchedDefinitionId() {
+        UUID entityId = UUID.randomUUID();
+        BattleId battleId = BattleId.random();
+
+        // Dragón con definition_id = "infernal" en PDC
+        FakeDataContainer pdc = new FakeDataContainer();
+        EnderDragon dragon = createFakeDragon(entityId, pdc);
+        DragonIdentity dragonIdentity = DragonIdentity.of(entityId, battleId, "infernal");
+        DragonPdcHandler.applyIdentity(dragon, dragonIdentity);
+
+        // Sesión configurada con definición "default" en su snapshot
+        BattleSession session = BattleSession.create(battleId, "world_the_end", UUID.randomUUID(), BattleConfigurationSnapshot.defaults());
+        session.start();
+        session.activate(dragonIdentity);
+
+        // Debe fallar porque el dragón es "infernal" pero la sesión espera "default"
+        assertFalse(DragonPdcHandler.validateDragonForSession(dragon, session));
+    }
+
+    @Test
+    @DisplayName("extractIdentity con schema_version futura desconocida retorna Optional.empty()")
+    void testExtractUnsupportedFutureSchemaVersionReturnsEmpty() {
+        UUID entityId = UUID.randomUUID();
+        BattleId battleId = BattleId.random();
+        FakeDataContainer pdc = new FakeDataContainer();
+        EnderDragon dragon = createFakeDragon(entityId, pdc);
+
+        pdc.set(BetterDragonKeys.MANAGED, PersistentDataType.BOOLEAN, true);
+        pdc.set(BetterDragonKeys.BATTLE_ID, PersistentDataType.STRING, battleId.asString());
+        pdc.set(BetterDragonKeys.DEFINITION_ID, PersistentDataType.STRING, "default");
+        pdc.set(BetterDragonKeys.SCHEMA_VERSION, PersistentDataType.INTEGER, 99); // Versión futura no soportada
+
+        Optional<DragonIdentity> result = DragonPdcHandler.extractIdentity(dragon);
+        assertTrue(result.isEmpty(), "Una entidad con schema_version no soportada debe ser rechazada");
+    }
+
+    @Test
+    @DisplayName("extractIdentity con schema_version inválida menor a 1 retorna Optional.empty()")
+    void testExtractInvalidSchemaVersionZeroReturnsEmpty() {
+        UUID entityId = UUID.randomUUID();
+        BattleId battleId = BattleId.random();
+        FakeDataContainer pdc = new FakeDataContainer();
+        EnderDragon dragon = createFakeDragon(entityId, pdc);
+
+        pdc.set(BetterDragonKeys.MANAGED, PersistentDataType.BOOLEAN, true);
+        pdc.set(BetterDragonKeys.BATTLE_ID, PersistentDataType.STRING, battleId.asString());
+        pdc.set(BetterDragonKeys.DEFINITION_ID, PersistentDataType.STRING, "default");
+        pdc.set(BetterDragonKeys.SCHEMA_VERSION, PersistentDataType.INTEGER, 0); // Versión inválida
+
+        Optional<DragonIdentity> result = DragonPdcHandler.extractIdentity(dragon);
+        assertTrue(result.isEmpty(), "Una entidad con schema_version < 1 debe ser rechazada");
     }
 
     // --- Helpers de prueba con Dynamic Proxy ---

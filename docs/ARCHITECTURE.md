@@ -140,14 +140,16 @@ BetterDragon administra su propio `EnderDragon` de forma autónoma y desacoplada
 Centralizada en `DragonPdcHandler` y `BetterDragonKeys`:
 - `betterdragon:managed`: Booleano `true` (byte `1`). Si está ausente o es falso, la entidad es tratada como dragón ajeno y jamás es procesada.
 - `betterdragon:battle_id`: UUID persistente en formato canónico String (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`).
-- *Nota de diseño (Fase 3.3-R1):* Las claves `betterdragon:definition_id` y `betterdragon:schema_version` se reservan para fases posteriores y **no** forman parte de la firma mínima escrita durante el spawn. `DragonPdcHandler.extractIdentity` aplica defaults transparentes (`"default"`, `1`) cuando están ausentes.
+- `betterdragon:definition_id`: Identificador tipado del perfil de dragón instanciado (`STRING`).
+- `betterdragon:schema_version`: Versión del esquema de persistencia PDC (`INTEGER = 1`).
+- *Nota histórica (Fase 3.3-R1 vs 3.13 / 3.13-R1):* En la fase 3.3-R1 las claves `definition_id` y `schema_version` se reservaron temporalmente; a partir de la Fase 3.13 / 3.13-R1, las 4 claves se escriben síncronamente al spawnear y se validan en el ciclo de vida y en `DragonPdcHandler.validateDragonForSession()`.
 
 ### 5.3 Coordinación del Ciclo de Vida (`BattleManager`)
 - **Secuencia Estricta PREPARING -> ACTIVE:**
   1. Validación de dimensión `THE_END` y no duplicidad en el mundo (`hasActiveSession`).
-  2. Generación de `BattleId` y congelamiento de snapshot (`BattleConfigurationSnapshot`).
+  2. Generación de `BattleId`, resolución de perfil y congelamiento de snapshot (`BattleConfigurationSnapshot`).
   3. Creación y registro de `BattleSession` en estado `PREPARING`.
-  4. Spawn físico de la entidad con marcado PDC atómico (solo `managed` y `battle_id`).
+  4. Spawn físico de la entidad con marcado PDC atómico de las 4 claves (`managed`, `battle_id`, `definition_id`, `schema_version`).
   5. Extracción y verificación física del PDC desde la entidad generada.
   6. Asociación de `DragonIdentity` y transición a `ACTIVE`.
 - **Limpieza Idempotente ante Fallos:** Si el spawn falla o la verificación PDC no pasa, se elimina la entidad parcial, la sesión se marca como `ABORTED` (`BattleAbortReason.SPAWN_FAILED`) y se remueve de `BattleSessionManager`.
@@ -769,3 +771,39 @@ BetterDragon 3.11 establece una frontera formal entre las capas de entrada (CLI 
 - **Edición en Caliente de Arenas:** `/bd arena create/delete/edit` no fue improvisado para evitar corromper `arenas.yml` sin un motor de serialización dedicado.
 - **DragonBattle / EndDragonFight:** Cero integración con el sistema vanilla; BetterDragon mantiene soberanía absoluta.
 - **NMS:** Cero NMS adicional en comandos ni en la capa de aplicación.
+
+---
+
+## 14. Catálogo de Dragones, Atributos Nativos y Escalado por Jugadores (Fases 3.13 / 3.13-R1)
+
+### 14.1 Componentes del Dominio:
+- **`DragonCatalog` (`config`):** Catálogo inmutable de perfiles de dragón (`DragonDefinition`) cargados desde `config.yml` (sección `dragons:`). Soporta múltiples perfiles, normalización insensible a mayúsculas, y resolución segura de perfiles default vs explícitos.
+- **`DragonAttributes` (`config`):** Encapsula los atributos nativos de Paper API:
+  - `Attribute.MAX_HEALTH` (Base obligatoria, por defecto 200.0 HP).
+  - `Attribute.MOVEMENT_SPEED` (Opcional, velocidad de vuelo Paper).
+  - `Attribute.FOLLOW_RANGE` (Opcional, rango de seguimiento de IA).
+  - `Attribute.ATTACK_DAMAGE` (Opcional, daño de ataque melee).
+  - *Exclusión:* `Attribute.SCALE` rechazado formalmente debido a que las partes multipart (`EnderDragonPart`) no escalan en el motor vanilla (MC-267372).
+- **`DragonScalingDefinition` & `ScalingMode` (`config`):** Modelo declarativo de escalado. En 3.13-R1 se consolida la **Semántica Opción A**:
+  - `enabled: true` sin `mode` infiere automáticamente `ScalingMode.LINEAR`.
+  - `enabled: false` sin `mode` infiere `ScalingMode.NONE`.
+  - Se rechaza formalmente la configuración inconsistente `enabled: true` con `mode: NONE`.
+  - Constantes de tuning (`health-per-player: 0.25`, `max-multiplier: 3.0`) catalogadas como `TUNING_CANDIDATE` (valores de ingeniería provisionales sujetos a calibración en pruebas de juego).
+- **`DragonScalingCalculator` (`config`):** Calculador puro, determinista y sin efectos colaterales que aplica la fórmula:
+  $$\text{SaludEfectiva} = \text{SaludBase} \times \min\left(\text{Cap}, \max\left(1.0, 1.0 + (N_{\text{activos}} - 1) \times \alpha\right)\right)$$
+  Donde $N_{\text{activos}}$ es el recuento síncrono de jugadores vivos en `SURVIVAL`/`ADVENTURE` dentro de los límites espaciales de la arena al iniciar la batalla.
+- **`EffectiveDragonStats` (`config`):** Snapshot inmutable que congela las estadísticas calculadas para la batalla en curso, impidiendo que recargas de configuración (`/bd reload`) o fluctuaciones de jugadores en combate alteren la salud o los atributos de una batalla activa.
+
+### 14.2 Firma Persistente PDC (Contrato Formal 3.13-R1):
+Todo dragón generado por BetterDragon porta síncronamente 4 claves en su `PersistentDataContainer`:
+1. `betterdragon:managed` (`BOOLEAN`, true).
+2. `betterdragon:battle_id` (`STRING`, UUID de la sesión).
+3. `betterdragon:definition_id` (`STRING`, ID normalizado del perfil).
+4. `betterdragon:schema_version` (`INTEGER`, versión soportada = 1).
+
+**Validación de Sesión:** `DragonPdcHandler.validateDragonForSession()` comprueba tanto el UUID de entidad y el `battle_id` como la compatibilidad estricta de `definition_id` frente al snapshot de la batalla, impidiendo que entidades con perfiles distintos usurpen la sesión activa. Versiones de esquema no soportadas (`schema_version > 1` o `< 1`) son rechazadas.
+
+### 14.3 Invocación Segura y Spawner (`DragonSpawner`):
+- Eliminación total de coordenadas mágicas históricas (`0.5, 128.0, 0.5`).
+- Derivación estricta desde `ArenaDefinition`: `arena.center().toLocation(world)` y podio `dragon.setPodium(arena.podium().toLocation(world))`.
+- Cero silenciamiento de excepciones: eliminación de `catch (Throwable ignored)`. Toda advertencia de atributos o podio es registrada con `Level.WARNING` para auditoría y trazabilidad operacional.

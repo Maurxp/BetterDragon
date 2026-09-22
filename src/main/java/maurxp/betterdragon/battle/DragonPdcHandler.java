@@ -26,6 +26,9 @@ import java.util.Optional;
  */
 public final class DragonPdcHandler {
 
+    public static final int CURRENT_SCHEMA_VERSION = 1;
+    public static final int MAX_SUPPORTED_SCHEMA_VERSION = 1;
+
     private DragonPdcHandler() {
         // Stateless / utilitario
     }
@@ -43,7 +46,8 @@ public final class DragonPdcHandler {
         PersistentDataContainer pdc = dragon.getPersistentDataContainer();
         pdc.set(BetterDragonKeys.MANAGED, PersistentDataType.BOOLEAN, true);
         pdc.set(BetterDragonKeys.BATTLE_ID, PersistentDataType.STRING, identity.battleId().asString());
-        // Phase 3.3-R1: definition_id y schema_version se reservan para fases futuras y NO se escriben en el spawn.
+        pdc.set(BetterDragonKeys.DEFINITION_ID, PersistentDataType.STRING, identity.definitionId());
+        pdc.set(BetterDragonKeys.SCHEMA_VERSION, PersistentDataType.INTEGER, identity.schemaVersion());
     }
 
     /**
@@ -57,6 +61,7 @@ public final class DragonPdcHandler {
      *   <li>Que el UUID de la entidad coincida exactamente con el UUID esperado.</li>
      *   <li>Que el PDC contenga {@code betterdragon:managed == true}.</li>
      *   <li>Que el PDC contenga un {@code betterdragon:battle_id} idéntico al de la sesión.</li>
+     *   <li>Que el PDC contenga un {@code betterdragon:definition_id} compatible con el snapshot de la sesión.</li>
      * </ol>
      *
      * @param entity  entidad física a validar
@@ -88,7 +93,18 @@ public final class DragonPdcHandler {
         }
 
         DragonIdentity extracted = extractedOpt.get();
-        return extracted.battleId().equals(session.getBattleId());
+        if (!extracted.battleId().equals(session.getBattleId())) {
+            return false;
+        }
+
+        if (session.getConfigSnapshot() != null && session.getConfigSnapshot().dragonDefinition() != null) {
+            String expectedDefinitionId = session.getConfigSnapshot().dragonDefinition().id();
+            if (!expectedDefinitionId.equalsIgnoreCase(extracted.definitionId())) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -134,15 +150,20 @@ public final class DragonPdcHandler {
             return Optional.empty();
         }
 
-        // 3. Obtener 'definition_id' y 'schema_version'
+        // 3. Obtener 'definition_id'
         String definitionId = pdc.getOrDefault(BetterDragonKeys.DEFINITION_ID, PersistentDataType.STRING, "default");
         if (definitionId == null || definitionId.isBlank()) {
             definitionId = "default";
         }
 
-        Integer schemaVersion = pdc.getOrDefault(BetterDragonKeys.SCHEMA_VERSION, PersistentDataType.INTEGER, 1);
-        if (schemaVersion == null || schemaVersion < 1) {
-            schemaVersion = 1;
+        // 4. Validar 'schema_version' (ausencia = legacy v1; versión desconocida futura = rechazo)
+        int schemaVersion = CURRENT_SCHEMA_VERSION;
+        if (pdc.has(BetterDragonKeys.SCHEMA_VERSION, PersistentDataType.INTEGER)) {
+            Integer rawVersion = pdc.get(BetterDragonKeys.SCHEMA_VERSION, PersistentDataType.INTEGER);
+            if (rawVersion == null || rawVersion < 1 || rawVersion > MAX_SUPPORTED_SCHEMA_VERSION) {
+                return Optional.empty();
+            }
+            schemaVersion = rawVersion;
         }
 
         return Optional.of(new DragonIdentity(dragon.getUniqueId(), battleId, definitionId, schemaVersion));

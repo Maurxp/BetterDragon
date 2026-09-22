@@ -27,7 +27,9 @@
 - **Fase 3.11–3.11-R1:** Commands / Admin UX (Application Layer compartida preparada para futuras GUIs, `/betterdragon` y `/bd`, permisos granulares, console safety, subcomandos help, leaderboard, stats, status, start, abort, reload, arena, claim, tab completion, 314 tests) `[DONE]`
 - **Fase 3.12:** Gameplay Research & Design (Investigación de mecánicas nativas, análisis de proyectos de referencia y patrones de incursión) `[DONE]`
 - **Fase 3.12-R1:** Consolidación, Auditoría y Cierre de Gameplay Research/Design (Auditoría de evidencias, taxonomía estricta, separación de Combat/Flight Phase, banco de experimentos EXP-001 a EXP-008 y especificación maestra) `[DONE]`
-- **Próxima Fase:** Fase 3.13 — Catálogo de Dragones, Atributos Nativos y Escalado por Jugadores `[TODO]`
+- **Fase 3.13:** Catálogo de Dragones, Atributos Nativos y Escalado por Jugadores (Catálogo inmutable `DragonCatalog`, soporte de múltiples perfiles en `config.yml` bajo la sección `dragons:`, atributos nativos `MAX_HEALTH`, `MOVEMENT_SPEED`, `FOLLOW_RANGE`, `ATTACK_DAMAGE`, exclusión estricta de `Attribute.SCALE` por bug MC-267372, escalado determinista Battle-Start Scaling CAND-01 con capping configurable, spawn y podio derivados matemáticamente de `ArenaDefinition`, snapshot inmutable con `EffectiveDragonStats`, persistencia PDC completa con `betterdragon:definition_id` y `schema_version = 1`, comando `/bd start [mundo] [arena] [perfil]`, `/bd status` con perfil activo) `[DONE]`
+- **Fase 3.13-R1:** Consolidación y Hardening de Perfiles, Atributos y Scaling (Semántica inequívoca Opción A para `scaling.enabled` y `mode`, eliminación de silenciamiento `Throwable` en `DragonSpawner`, restauración completa de cobertura de invariantes en `DragonDefinitionTest`, validación estricta de `definition_id` y `schema_version = 1` en PDC y `bd-test-lifecycle`, corrección documental de fuentes de configuración reales) `[DONE]`
+- **Próxima Fase:** Fase 3.14 — Dynamic BossBar & Combat Phase Polish `[TODO]`
 
 ---
 

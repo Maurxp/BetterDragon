@@ -54,8 +54,7 @@ Las siguientes capacidades ya existen y han sido validadas en el código de prod
 1. **Gestión Autónoma del Ciclo de Vida (`BattleSession`):**  
    Desacoplamiento total de `DragonBattle` vanilla. La batalla posee su propia máquina de estados formal (`INITIALIZING`, `PREPARING`, `ACTIVE`, `VICTORY`, `TERMINATING`, `ABORTED`, `DEFERRED_PENDING_CHUNK_LOAD`).
 2. **Identidad Persistente en PDC (`DragonPdcHandler`):**  
-   Marcado síncrono del dragón en el spawn con `betterdragon:managed = true` y `betterdragon:battle_id = <uuid>`.  
-   *Nota de Auditoría:* Las claves `betterdragon:definition_id` y `betterdragon:schema_version` están actualmente reservadas para fases futuras y **no** se escriben todavía en el PDC físico del spawn.
+   Marcado síncrono del dragón en el spawn con `betterdragon:managed = true`, `betterdragon:battle_id = <uuid>`, `betterdragon:definition_id = <id>` y `betterdragon:schema_version = 1`. (Consolidado en Fase 3.13).
 3. **Tracking Determinista de Daño y `TOP_DAMAGE` (`CombatRuntime`):**  
    Acumulación monotónica del daño por jugador con desempate determinista por orden de primer impacto.
 4. **Reparto Proporcional de Botín y Recompensas (`RewardAllocationEngine`):**  
@@ -64,6 +63,10 @@ Las siguientes capacidades ya existen y han sido validadas en el código de prod
    Almacenamiento transaccional asíncrono en SQLite (esquema v2) con comando interactivo de reclamo `/bd claim`.
 6. **Supresión NMS Aislada de BossBar Vanilla:**  
    Ocultamiento automático de la barra nativa para sustituirla por la BossBar estilizada administrada por el plugin.
+7. **Catálogo de Dragones y Atributos Nativos (`DragonCatalog`, `DragonAttributes`):**
+   Soporte completo para múltiples definiciones de dragones en `config.yml` (sección `dragons:`) congeladas en `BattleConfigurationSnapshot`. Control nativo Paper de `MAX_HEALTH`, `MOVEMENT_SPEED`, `FOLLOW_RANGE` y `ATTACK_DAMAGE`, con exclusión de `Attribute.SCALE` por bug MC-267372. (Implementado en Fase 3.13, consolidado en 3.13-R1).
+8. **Escalado Determinista de Salud al Inicio de Batalla (*Battle-Start Scaling* CAND-01):**
+   Cálculo inmutable de `EffectiveDragonStats` en el snapshot de inicio de batalla según la cantidad de jugadores presentes en la arena geométrica. Fórmula lineal con capping y suelo unitario, inmune a reconexiones o muertes durante el combate. (Implementado en Fase 3.13, consolidado en 3.13-R1).
 
 ---
 
@@ -71,15 +74,17 @@ Las siguientes capacidades ya existen y han sido validadas en el código de prod
 
 Propuestas de diseño maduras derivadas de la investigación, planificadas para fases posteriores:
 
-### 1. Control de Atributos Nativos (Target: Fase 3.13)
+### 1. Control de Atributos Nativos — `[IMPLEMENTADO EN FASE 3.13]`
 - `Attribute.MAX_HEALTH`: Salud base personalizable mediante configuración.
 - `Attribute.MOVEMENT_SPEED`: Ajuste fino de aceleración de vuelo.
 - `Attribute.FOLLOW_RANGE`: Ampliación del rango de detección en arenas de gran tamaño.
+- `Attribute.ATTACK_DAMAGE`: Daño base de ataque cuerpo a cuerpo.
+- *Nota:* `Attribute.SCALE` rechazado formalmente por bug de motor MC-267372.
 
-### 2. Escalado de Salud por Jugador al Inicio de Batalla (*Battle-Start Scaling*) (Target: Fase 3.13)
+### 2. Escalado de Salud por Jugador al Inicio de Batalla (*Battle-Start Scaling*) — `[IMPLEMENTADO EN FASE 3.13]`
 Ajuste de la salud máxima del dragón al momento de spawnear según los participantes presentes:
-$$\text{SaludEfectiva} = \text{SaludBase} \times \min\left(\text{Cap}, 1.0 + (N_{\text{activos}} - 1) \times \alpha\right)$$
-Donde $\alpha$ y $\text{Cap}$ son candidatos iniciales de calibración (`TUNING_CANDIDATE`).
+$$\text{SaludEfectiva} = \text{SaludBase} \times \min\left(\text{Cap}, \max\left(1.0, 1.0 + (N_{\text{activos}} - 1) \times \alpha\right)\right)$$
+Donde $\alpha$ (`health-per-player`) y $\text{Cap}$ (`max-multiplier`) son parametrizables por definición de dragón.
 
 ### 3. Bombardeo Aéreo de TNT con Terreno Inmune (Target: Fase 3.15)
 Genera proyectiles explosivos telegrafiados mientras el dragón vuela en `CIRCLING`, forzando movimiento activo en tierra mientras el daño a bloques se cancela totalmente vía flag de arena.
@@ -172,18 +177,18 @@ Ningún valor numérico se asume como una verdad absoluta ni definitiva. Todos l
 
 ### Estado Actual de los Archivos de Configuración (Fase 3.11-R1)
 Actualmente, el plugin opera con:
-- `config.yml`: Parámetros globales, portal, logging, catálogo de habilidades, sección `dragons` con un único dragón activo (por defecto `"default"`) y sección de recompensas.
+- `config.yml`: Parámetros globales, portal, logging, catálogo de habilidades, sección `dragons:` con el catálogo de variantes de dragón y sección de recompensas.
 - `arenas.yml`: Catálogo de arenas (`bounds`, `center`, `podium`, `rules`).
 
-*Limitación de Código Auditada:* En `ConfigurationLoader.java` (líneas 265-267), el cargador resuelve un único `DragonDefinition` para la sesión (la clave `"default"` o la primera que encuentre). No existe aún un mapa en memoria `Map<String, DragonDefinition>` seleccionable dinámicamente por arena o comando.
+*[Estado histórico 3.12-R1 | Resuelto en Fase 3.13 y consolidado en 3.13-R1]:* En la Fase 3.12, `ConfigurationLoader.java` resolvía únicamente un dragón (la clave `"default"` o la primera que encontrara). A partir de la Fase 3.13, se implementó el catálogo inmutable `DragonCatalog`, soportando múltiples `DragonDefinition` en `config.yml` (sección `dragons:`) indexadas por ID y seleccionables por comando o arena.
 
 ### Estructura de Configuración Objetivo (Target Configuration)
-La evolución modular proyectada segmentará la configuración en archivos limpios con responsabilidades separadas:
+La evolución modular proyectada segmentará la configuración en archivos limpios con responsabilidades separadas (la división modular a múltiples archivos se mantiene como visión arquitectónica futura):
 ```text
 plugins/BetterDragon/
-├── config.yml           # Ajustes globales, almacenamiento SQLite y depuración
-├── dragons.yml          # Catálogo completo de variantes de dragón y atributos
-├── phases.yml           # Definición declarativa de secuencias de fases de combate
+├── config.yml           # Ajustes globales, almacenamiento SQLite y depuración (actualmente incluye dragons:)
+├── dragons.yml          # [FUTURE] Propuesta de catálogo independiente de variantes de dragón y atributos
+├── phases.yml           # [FUTURE] Definición declarativa de secuencias de fases de combate
 ├── abilities.yml        # Catálogo tipado de habilidades, proyectiles y telegrafiado
 ├── arenas.yml           # Geometría de arenas y políticas modulares anti-cheese
 └── rewards.yml          # Pools de recompensas por rangos de contribución
@@ -242,11 +247,11 @@ Toda mecánica candidata debe ser validada mediante los experimentos técnicos f
 
 ---
 
-## M. Alcance Recomendado para la Fase 3.13 (Implementation Scope)
+## M. Alcance de la Fase 3.13 y Consolidación 3.13-R1 (Implementation Scope) — `[IMPLEMENTADO]`
 
-La Fase 3.13 representará el primer paso de implementación de este diseño. Su alcance específico se limitará a:
-1. **Catálogo de Múltiples Dragones:** Evolución de `ConfigurationLoader` para cargar un mapa tipado `Map<String, DragonDefinition>` desde `dragons.yml`, permitiendo seleccionar variantes por arena o comando.
-2. **Control de Atributos Nativos del Dragón:** Aplicación formal de `Attribute.MAX_HEALTH`, `Attribute.MOVEMENT_SPEED` y `Attribute.FOLLOW_RANGE` durante el spawn en `DragonSpawner`.
-3. **Escalado de Salud al Inicio de Batalla (*Battle-Start Scaling*):** Implementación de la fórmula de escalado basada en los participantes presentes en la arena durante el cambio de estado `PREPARING -> ACTIVE`.
+La Fase 3.13 y su consolidación 3.13-R1 implementaron:
+1. **Catálogo de Múltiples Dragones:** Carga de un catálogo inmutable `DragonCatalog` desde la sección `dragons:` de `config.yml`, permitiendo seleccionar variantes por comando (`/bd start [mundo] [arena] [perfil]`) y congelándolas en snapshots inmutables.
+2. **Control de Atributos Nativos del Dragón:** Aplicación formal de `Attribute.MAX_HEALTH`, `Attribute.MOVEMENT_SPEED`, `Attribute.FOLLOW_RANGE` y `Attribute.ATTACK_DAMAGE` durante el spawn en `DragonSpawner`.
+3. **Escalado de Salud al Inicio de Batalla (*Battle-Start Scaling*):** Implementación de la fórmula de escalado determinista basada en los participantes presentes en la arena durante el cambio de estado `PREPARING -> ACTIVE`.
 4. **Vinculación Espacial Arena → Dragón:** Conexión estricta de las coordenadas de spawn y podio (`dragon.setPodium()`) derivadas directamente de `ArenaDefinition`.
-5. **Ampliación de Identidad PDC:** Escritura formal de `betterdragon:definition_id` durante el spawn de la entidad.
+5. **Ampliación de Identidad PDC:** Escritura y validación formal de `betterdragon:definition_id` y `betterdragon:schema_version = 1` durante el spawn de la entidad.

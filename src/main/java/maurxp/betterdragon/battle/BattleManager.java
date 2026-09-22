@@ -13,11 +13,13 @@ import maurxp.betterdragon.combat.ParticipantSnapshot;
 import maurxp.betterdragon.config.BattleConfigurationSnapshot;
 import maurxp.betterdragon.config.ConfigurationService;
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.Player;
 import org.bukkit.event.entity.EntityDeathEvent;
 
 import java.util.Objects;
@@ -168,22 +170,36 @@ public class BattleManager {
                     + "' no se encuentra cargado o disponible en el servidor.");
         }
 
-        // 4. Generar identidades y congelar configuración con snapshot inmutable
+        // 4. Resolver definición y recuento de jugadores para escalado determinista
+        String targetDefinition = (definitionId != null && !definitionId.isBlank()) ? definitionId.trim().toLowerCase() : null;
+        if (targetDefinition != null) {
+            if (configService.getDragonDefinition(targetDefinition).isEmpty()) {
+                throw new IllegalArgumentException("La definición de dragón solicitada '" + definitionId + "' no existe en el catálogo.");
+            }
+        } else {
+            if (!configService.getDragonCatalog().hasDefaultDefinition()) {
+                throw new IllegalStateException("No se especificó un perfil de dragón y no existe una definición 'default' configurada en el catálogo.");
+            }
+            targetDefinition = configService.getDragonCatalog().defaultDefinitionId();
+        }
+
+        int playerCount = countEligiblePlayersInArena(world, arena);
+
+        // 5. Generar identidades y congelar configuración con snapshot inmutable
         BattleId battleId = BattleId.random();
-        BattleConfigurationSnapshot snapshot = configService.createBattleSnapshot(arena);
+        BattleConfigurationSnapshot snapshot = configService.createBattleSnapshot(arena, targetDefinition, playerCount);
         BattleSession session = BattleSession.create(battleId, world.getName(), world.getUID(), snapshot);
 
-        // 5. Iniciar PREPARING y registrar sesión
+        // 6. Iniciar PREPARING y registrar sesión
         session.start();
         sessionManager.register(session);
         logger.info("[BetterDragon] Preparando batalla " + battleId + " en el mundo " + world.getName()
-                + " (arena: " + arena.id() + ")...");
+                + " (arena: " + arena.id() + ", perfil: " + targetDefinition + ", jugadores: " + playerCount + ")...");
 
-
-        // 5. Spawnear dragón con PDC
+        // 7. Spawnear dragón con PDC y estadísticas efectivas derivadas de la arena
         EnderDragon dragon;
         try {
-            dragon = spawner.spawnDragon(world, spawnLocation, battleId, definitionId);
+            dragon = spawner.spawnDragon(world, arena, snapshot.effectiveDragonStats(), battleId, spawnLocation);
         } catch (Exception e) {
             logger.log(Level.SEVERE, "[BetterDragon] Error al spawnear el dragón para la batalla " + battleId + ": " + e.getMessage(), e);
             session.abort(BattleAbortReason.SPAWN_FAILED);
@@ -191,7 +207,7 @@ public class BattleManager {
             throw new RuntimeException("Fallo al crear la entidad del dragón: " + e.getMessage(), e);
         }
 
-        // 6. Validar que la entidad física existe y porta el PDC correcto
+        // 8. Validar que la entidad física existe y porta el PDC correcto
         Optional<DragonIdentity> identityOpt = DragonPdcHandler.extractIdentity(dragon);
         if (identityOpt.isEmpty() || !identityOpt.get().battleId().equals(battleId)) {
             logger.severe("[BetterDragon] La entidad spawneada no superó la verificación de identidad PDC. Abortando batalla.");
@@ -201,13 +217,13 @@ public class BattleManager {
             throw new IllegalStateException("La entidad generada no contiene la identidad PDC válida de BetterDragon.");
         }
 
-        // 7. Asociar identidad y transicionar PREPARING -> ACTIVE
+        // 9. Asociar identidad y transicionar PREPARING -> ACTIVE
         DragonIdentity identity = identityOpt.get();
         session.activate(identity);
         logger.info("[BetterDragon] Batalla " + battleId + " activada exitosamente con dragón UUID: " + dragon.getUniqueId());
 
-        // 8. Inicializar runtime de fases con la entidad
-        double maxHealth = 200.0;
+        // 10. Inicializar runtime de fases con la entidad y salud efectiva calibrada
+        double maxHealth = snapshot.effectiveDragonStats().maxHealth();
         try {
             if (dragon.getAttribute(Attribute.MAX_HEALTH) != null) {
                 maxHealth = dragon.getAttribute(Attribute.MAX_HEALTH).getValue();
@@ -227,6 +243,35 @@ public class BattleManager {
         session.getPhaseRuntime().initialize(currentHealth, maxHealth, tick, dragon);
 
         return session;
+    }
+
+    /**
+     * Cuenta deterministamente la cantidad de jugadores activos y elegibles dentro de los límites de la arena.
+     *
+     * @param world mundo del End
+     * @param arena definición de arena
+     * @return número de jugadores elegibles presentes en la arena
+     */
+    public int countEligiblePlayersInArena(World world, ArenaDefinition arena) {
+        if (world == null || arena == null) {
+            return 0;
+        }
+        int count = 0;
+        try {
+            if (world.getPlayers() != null) {
+                for (Player player : world.getPlayers()) {
+                    if (player != null && player.isOnline() && !player.isDead()) {
+                        GameMode gm = player.getGameMode();
+                        if ((gm == GameMode.SURVIVAL || gm == GameMode.ADVENTURE) && arena.bounds().contains(player.getLocation())) {
+                            count++;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // Entornos de prueba o mocks donde world.getPlayers() no está disponible
+        }
+        return count;
     }
 
     /**

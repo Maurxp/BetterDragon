@@ -344,6 +344,15 @@ public class BattleSession {
     }
 
     /**
+     * Alias de conveniencia para {@link #getConfigSnapshot()}.
+     *
+     * @return snapshot inmutable de configuración
+     */
+    public BattleConfigurationSnapshot getSnapshot() {
+        return configSnapshot;
+    }
+
+    /**
      * Retorna el runtime de combate asociado exclusivamente a esta sesión de
      * batalla.
      *

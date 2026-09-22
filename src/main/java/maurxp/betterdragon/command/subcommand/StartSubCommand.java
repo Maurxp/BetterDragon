@@ -64,11 +64,16 @@ public class StartSubCommand implements SubCommand {
         String[] args = context.args();
         World targetWorld = null;
         String arenaId = "default";
-        String definitionId = "default";
+        String definitionId = null;
 
         if (args.length > 0) {
             String worldName = args[0].trim();
-            targetWorld = Bukkit.getWorld(worldName);
+            try {
+                if (Bukkit.getServer() != null) {
+                    targetWorld = Bukkit.getWorld(worldName);
+                }
+            } catch (Exception ignored) {
+            }
             if (targetWorld == null) {
                 context.sendError("El mundo '§e" + worldName + "§c' no existe o no está cargado.");
                 return;
@@ -123,7 +128,10 @@ public class StartSubCommand implements SubCommand {
                     .toList();
         }
         if (args.length == 3) {
-            return List.of("default");
+            String prefix = args[2].toLowerCase();
+            return battleAdminService.getAvailableDragonDefinitions().stream()
+                    .filter(id -> id.toLowerCase().startsWith(prefix))
+                    .toList();
         }
         return List.of();
     }

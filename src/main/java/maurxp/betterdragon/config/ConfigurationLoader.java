@@ -17,6 +17,7 @@ import java.io.Reader;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -256,82 +257,264 @@ public final class ConfigurationLoader {
         }
 
         // 5. dragons catalog
-        DragonDefinition dragonDefinition = null;
+        DragonCatalog dragonCatalog = null;
         if (config.contains("dragons")) {
             ConfigurationSection dragonsSec = config.getConfigurationSection("dragons");
             if (dragonsSec == null) {
                 errors.add("La sección 'dragons' debe ser un mapa.");
+            } else if (dragonsSec.getKeys(false).isEmpty()) {
+                errors.add("La sección 'dragons' está vacía; debe definir al menos un dragón.");
             } else {
-                String targetDragonKey = dragonsSec.contains("default")
-                        ? "default"
-                        : dragonsSec.getKeys(false).stream().findFirst().orElse(null);
+                Map<String, DragonDefinition> parsedDefinitions = new LinkedHashMap<>();
+                Set<String> seenDragonIds = new HashSet<>();
 
-                if (targetDragonKey == null) {
-                    errors.add("La sección 'dragons' está vacía; debe definir al menos un dragón.");
-                } else {
-                    ConfigurationSection dSec = dragonsSec.getConfigurationSection(targetDragonKey);
+                for (String rawDragonKey : dragonsSec.getKeys(false)) {
+                    if (rawDragonKey == null || rawDragonKey.isBlank()) {
+                        errors.add("Se encontró una clave de dragón nula o vacía en 'dragons'.");
+                        continue;
+                    }
+
+                    String trimmedKey = rawDragonKey.trim();
+                    if (!trimmedKey.matches("^[a-zA-Z0-9_-]+$")) {
+                        errors.add("Identificador de dragón inválido '" + rawDragonKey
+                                + "'. Solo puede contener letras, números, guiones y guiones bajos (sin espacios ni caracteres especiales).");
+                    }
+
+                    String normalizedDragonId = trimmedKey.toLowerCase();
+                    if (!seenDragonIds.add(normalizedDragonId)) {
+                        errors.add("Identificador de dragón duplicado o en colisión case-insensitive: '" + rawDragonKey + "'.");
+                    }
+
+                    ConfigurationSection dSec = dragonsSec.getConfigurationSection(rawDragonKey);
                     if (dSec == null) {
-                        errors.add("El dragón '" + targetDragonKey + "' debe ser una sección de configuración.");
-                    } else {
-                        List<?> rawPhases = dSec.getList("phases");
-                        if (rawPhases == null || rawPhases.isEmpty()) {
-                            errors.add("El dragón '" + targetDragonKey + "' debe contener una lista 'phases' no vacía.");
+                        errors.add("El dragón '" + rawDragonKey + "' debe ser una sección de configuración.");
+                        continue;
+                    }
+
+                    // display_name
+                    String displayName = dSec.getString("display_name");
+                    if (displayName == null) {
+                        displayName = dSec.getString("displayName");
+                    }
+
+                    // attributes
+                    DragonAttributes attributes = DragonAttributes.defaults();
+                    if (dSec.contains("attributes")) {
+                        ConfigurationSection attrSec = dSec.getConfigurationSection("attributes");
+                        if (attrSec == null) {
+                            errors.add("Dragón '" + rawDragonKey + "': la sección 'attributes' debe ser un mapa.");
                         } else {
-                            List<PhaseDefinition> phases = new ArrayList<>();
-                            int order = 0;
-                            for (Object obj : rawPhases) {
-                                if (obj instanceof Map<?, ?> map) {
-                                    Object rawId = map.get("id");
-                                    Object rawThresh = map.get("threshold");
-                                    Object rawAbilities = map.get("abilities");
-
-                                    String pId = rawId != null ? rawId.toString() : null;
-                                    if (pId == null || pId.isBlank()) {
-                                        errors.add("Dragón '" + targetDragonKey + "', fase en índice " + order + ": 'id' no puede estar vacío.");
-                                    }
-
-                                    double thresh = -1.0;
-                                    if (rawThresh instanceof Number n) {
-                                        thresh = n.doubleValue();
-                                        if (thresh <= 0.0 || thresh > 1.0) {
-                                            errors.add("Dragón '" + targetDragonKey + "', fase '" + pId
-                                                    + "': threshold debe estar en (0.0, 1.0]. Se encontró: " + thresh);
-                                        }
+                            double maxHealth = DragonAttributes.DEFAULT_MAX_HEALTH;
+                            Object rawHealth = attrSec.contains("max_health") ? attrSec.get("max_health") : attrSec.get("max-health");
+                            if (rawHealth != null) {
+                                if (rawHealth instanceof Number n) {
+                                    double val = n.doubleValue();
+                                    if (Double.isNaN(val) || Double.isInfinite(val) || val <= 0.0) {
+                                        errors.add("Dragón '" + rawDragonKey + "': 'attributes.max_health' debe ser un número positivo finito (> 0). Se encontró: " + val);
                                     } else {
-                                        errors.add("Dragón '" + targetDragonKey + "', fase '" + pId + "': threshold debe ser un número.");
-                                    }
-
-                                    List<String> abList = new ArrayList<>();
-                                    if (rawAbilities instanceof List<?> l) {
-                                        for (Object abItem : l) {
-                                            if (abItem != null) {
-                                                abList.add(abItem.toString());
-                                            }
-                                        }
-                                    }
-
-                                    if (pId != null && !pId.isBlank() && thresh > 0.0 && thresh <= 1.0) {
-                                        phases.add(new PhaseDefinition(pId, order, thresh, abList));
+                                        maxHealth = val;
                                     }
                                 } else {
-                                    errors.add("Dragón '" + targetDragonKey + "': cada fase debe ser un mapa.");
+                                    errors.add("Dragón '" + rawDragonKey + "': 'attributes.max_health' debe ser un número.");
                                 }
-                                order++;
                             }
 
-                            if (errors.isEmpty() && !phases.isEmpty()) {
-                                try {
-                                    dragonDefinition = new DragonDefinition(targetDragonKey, phases, abilitiesCatalog);
-                                } catch (IllegalArgumentException e) {
-                                    errors.add("Error de validación en el dragón '" + targetDragonKey + "': " + e.getMessage());
+                            Double movementSpeed = null;
+                            Object rawSpeed = attrSec.contains("movement_speed") ? attrSec.get("movement_speed") : attrSec.get("movement-speed");
+                            if (rawSpeed != null) {
+                                if (rawSpeed instanceof Number n) {
+                                    double val = n.doubleValue();
+                                    if (Double.isNaN(val) || Double.isInfinite(val) || val <= 0.0) {
+                                        errors.add("Dragón '" + rawDragonKey + "': 'attributes.movement_speed' debe ser un número positivo finito (> 0). Se encontró: " + val);
+                                    } else {
+                                        movementSpeed = val;
+                                    }
+                                } else {
+                                    errors.add("Dragón '" + rawDragonKey + "': 'attributes.movement_speed' debe ser un número.");
+                                }
+                            }
+
+                            Double followRange = null;
+                            Object rawRange = attrSec.contains("follow_range") ? attrSec.get("follow_range") : attrSec.get("follow-range");
+                            if (rawRange != null) {
+                                if (rawRange instanceof Number n) {
+                                    double val = n.doubleValue();
+                                    if (Double.isNaN(val) || Double.isInfinite(val) || val <= 0.0) {
+                                        errors.add("Dragón '" + rawDragonKey + "': 'attributes.follow_range' debe ser un número positivo finito (> 0). Se encontró: " + val);
+                                    } else {
+                                        followRange = val;
+                                    }
+                                } else {
+                                    errors.add("Dragón '" + rawDragonKey + "': 'attributes.follow_range' debe ser un número.");
+                                }
+                            }
+
+                            Double attackDamage = null;
+                            Object rawDamage = attrSec.contains("attack_damage") ? attrSec.get("attack_damage") : attrSec.get("attack-damage");
+                            if (rawDamage != null) {
+                                if (rawDamage instanceof Number n) {
+                                    double val = n.doubleValue();
+                                    if (Double.isNaN(val) || Double.isInfinite(val) || val < 0.0) {
+                                        errors.add("Dragón '" + rawDragonKey + "': 'attributes.attack_damage' debe ser un número >= 0 finito. Se encontró: " + val);
+                                    } else {
+                                        attackDamage = val;
+                                    }
+                                } else {
+                                    errors.add("Dragón '" + rawDragonKey + "': 'attributes.attack_damage' debe ser un número.");
+                                }
+                            }
+
+                            try {
+                                attributes = new DragonAttributes(maxHealth, movementSpeed, followRange, attackDamage);
+                            } catch (IllegalArgumentException e) {
+                                errors.add("Dragón '" + rawDragonKey + "': " + e.getMessage());
+                            }
+                        }
+                    }
+
+                    // scaling
+                    DragonScalingDefinition scaling = DragonScalingDefinition.defaults();
+                    if (dSec.contains("scaling")) {
+                        ConfigurationSection scSec = dSec.getConfigurationSection("scaling");
+                        if (scSec == null) {
+                            errors.add("Dragón '" + rawDragonKey + "': la sección 'scaling' debe ser un mapa.");
+                        } else {
+                            boolean scalingEnabled = scSec.getBoolean("enabled", false);
+                            ScalingMode scalingMode = null;
+                            if (scSec.contains("mode")) {
+                                String rawMode = scSec.getString("mode");
+                                if (rawMode != null) {
+                                    try {
+                                        scalingMode = ScalingMode.valueOf(rawMode.toUpperCase().trim());
+                                    } catch (IllegalArgumentException e) {
+                                        errors.add("Dragón '" + rawDragonKey + "': 'scaling.mode' inválido '" + rawMode + "'. Permitidos: NONE, LINEAR.");
+                                    }
+                                }
+                            }
+
+                            if (scalingMode == null) {
+                                // Opción A: enabled: true implica LINEAR cuando mode está ausente; enabled: false implica NONE
+                                scalingMode = scalingEnabled ? ScalingMode.LINEAR : ScalingMode.NONE;
+                            } else if (scalingEnabled && scalingMode == ScalingMode.NONE) {
+                                errors.add("Dragón '" + rawDragonKey + "': 'scaling.mode' no puede ser NONE cuando 'scaling.enabled' es true.");
+                            }
+
+                            double healthPerPlayer = DragonScalingDefinition.DEFAULT_HEALTH_PER_PLAYER;
+                            Object rawHpp = scSec.contains("health_per_player") ? scSec.get("health_per_player") : scSec.get("health-per-player");
+                            if (rawHpp != null) {
+                                if (rawHpp instanceof Number n) {
+                                    double val = n.doubleValue();
+                                    if (Double.isNaN(val) || Double.isInfinite(val) || val < 0.0) {
+                                        errors.add("Dragón '" + rawDragonKey + "': 'scaling.health_per_player' debe ser un número >= 0.0 finito. Se encontró: " + val);
+                                    } else {
+                                        healthPerPlayer = val;
+                                    }
+                                } else {
+                                    errors.add("Dragón '" + rawDragonKey + "': 'scaling.health_per_player' debe ser un número.");
+                                }
+                            }
+
+                            double maxMultiplier = DragonScalingDefinition.DEFAULT_MAX_HEALTH_MULTIPLIER;
+                            Object rawMult = scSec.contains("max_health_multiplier") ? scSec.get("max_health_multiplier") : scSec.get("max-health-multiplier");
+                            if (rawMult != null) {
+                                if (rawMult instanceof Number n) {
+                                    double val = n.doubleValue();
+                                    if (Double.isNaN(val) || Double.isInfinite(val) || val < 1.0) {
+                                        errors.add("Dragón '" + rawDragonKey + "': 'scaling.max_health_multiplier' debe ser un número >= 1.0 finito. Se encontró: " + val);
+                                    } else {
+                                        maxMultiplier = val;
+                                    }
+                                } else {
+                                    errors.add("Dragón '" + rawDragonKey + "': 'scaling.max_health_multiplier' debe ser un número.");
+                                }
+                            }
+
+                            try {
+                                scaling = new DragonScalingDefinition(scalingEnabled, scalingMode, healthPerPlayer, maxMultiplier);
+                            } catch (IllegalArgumentException e) {
+                                if (!errors.stream().anyMatch(err -> err.contains("scaling.mode"))) {
+                                    errors.add("Dragón '" + rawDragonKey + "': " + e.getMessage());
                                 }
                             }
                         }
                     }
+
+                    // phases
+                    List<?> rawPhases = dSec.getList("phases");
+                    if (rawPhases == null || rawPhases.isEmpty()) {
+                        errors.add("El dragón '" + rawDragonKey + "' debe contener una lista 'phases' no vacía.");
+                    } else {
+                        List<PhaseDefinition> phases = new ArrayList<>();
+                        int order = 0;
+                        for (Object obj : rawPhases) {
+                            if (obj instanceof Map<?, ?> map) {
+                                Object rawId = map.get("id");
+                                Object rawThresh = map.get("threshold");
+                                Object rawAbilities = map.get("abilities");
+
+                                String pId = rawId != null ? rawId.toString() : null;
+                                if (pId == null || pId.isBlank()) {
+                                    errors.add("Dragón '" + rawDragonKey + "', fase en índice " + order + ": 'id' no puede estar vacío.");
+                                }
+
+                                double thresh = -1.0;
+                                if (rawThresh instanceof Number n) {
+                                    thresh = n.doubleValue();
+                                    if (thresh <= 0.0 || thresh > 1.0) {
+                                        errors.add("Dragón '" + rawDragonKey + "', fase '" + pId
+                                                + "': threshold debe estar en (0.0, 1.0]. Se encontró: " + thresh);
+                                    }
+                                } else {
+                                    errors.add("Dragón '" + rawDragonKey + "', fase '" + pId + "': threshold debe ser un número.");
+                                }
+
+                                List<String> abList = new ArrayList<>();
+                                if (rawAbilities instanceof List<?> l) {
+                                    for (Object abItem : l) {
+                                        if (abItem != null) {
+                                            abList.add(abItem.toString());
+                                        }
+                                    }
+                                }
+
+                                if (pId != null && !pId.isBlank() && thresh > 0.0 && thresh <= 1.0) {
+                                    phases.add(new PhaseDefinition(pId, order, thresh, abList));
+                                }
+                            } else {
+                                errors.add("Dragón '" + rawDragonKey + "': cada fase debe ser un mapa.");
+                            }
+                            order++;
+                        }
+
+                        if (!phases.isEmpty()) {
+                            try {
+                                DragonDefinition def = new DragonDefinition(
+                                        normalizedDragonId,
+                                        displayName,
+                                        attributes,
+                                        scaling,
+                                        phases,
+                                        abilitiesCatalog
+                                );
+                                parsedDefinitions.put(normalizedDragonId, def);
+                            } catch (IllegalArgumentException e) {
+                                errors.add("Error de validación en el dragón '" + rawDragonKey + "': " + e.getMessage());
+                            }
+                        }
+                    }
+                }
+
+                if (!parsedDefinitions.isEmpty()) {
+                    String defaultId = parsedDefinitions.containsKey("default") ? "default" : null;
+                    try {
+                        dragonCatalog = new DragonCatalog(parsedDefinitions, defaultId);
+                    } catch (IllegalArgumentException e) {
+                        errors.add("Error al construir el catálogo de dragones: " + e.getMessage());
+                    }
                 }
             }
         } else {
-            dragonDefinition = DragonDefinition.defaults();
+            dragonCatalog = DragonCatalog.defaults();
         }
 
         // 6. rewards
@@ -457,7 +640,7 @@ public final class ConfigurationLoader {
             throw new ConfigValidationException("Errores de validación en la configuración de BetterDragon", errors);
         }
 
-        return new BetterDragonConfig(portalEnabled, loggingLevel, debugLogging, dragonDefinition, rewardConfig);
+        return new BetterDragonConfig(portalEnabled, loggingLevel, debugLogging, dragonCatalog, rewardConfig);
     }
 
     private static void validateRewardItem(
