@@ -1,0 +1,18 @@
+# Fuentes Públicas y Enlaces de Referencia para Investigación
+
+## BetterDragon de Amonly (shanruto)
+- **Recurso Oficial en SpigotMC:** https://www.spigotmc.org/resources/betterdragon-counter-attacks-abilities.81439/
+- **Propósito:** Estudio conceptual de contrataques y habilidades reactivas (`ON_DAMAGE_TAKEN`).
+
+## BetterDragon de KaevonD (HarderBosses)
+- **Repositorio Público en GitHub:** https://github.com/KaevonD/BetterDragon
+- **Propósito:** Análisis de sincronización con `EnderDragonChangePhaseEvent` y mecánicas de arena.
+
+## DragonSlayer de Jeppa
+- **Recurso Oficial en SpigotMC:** https://www.spigotmc.org/resources/dragonslayer.36250/
+- **Documentación Oficial:** https://www.spigotmc.org/resources/dragonslayer.36250/field?field=documentation
+- **Propósito:** Evaluación de experiencia de juego histórica, temporizadores y limitaciones del modelo bullet-sponge.
+
+## Referencias Técnicas de PaperMC y Mojang
+- **Mojira Issue MC-267372:** https://bugs.mojang.com/browse/MC-267372 (Ender Dragon multipart ignores generic.scale)
+- **PaperMC Javadocs (26.1.2):** https://jd.papermc.io/paper/
