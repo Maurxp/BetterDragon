@@ -1,6 +1,5 @@
 package maurxp.betterdragon.command;
 
-import org.bukkit.ChatColor;
 import org.bukkit.command.CommandSender;
 
 import java.util.Objects;

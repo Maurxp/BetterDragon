@@ -24,7 +24,6 @@ import maurxp.betterdragon.reward.event.RewardEventDispatcher;
 import maurxp.betterdragon.reward.model.ClaimStatus;
 import maurxp.betterdragon.reward.model.RewardClaim;
 import maurxp.betterdragon.reward.model.RewardItem;
-import maurxp.betterdragon.reward.model.RewardSource;
 import maurxp.betterdragon.reward.service.DragonRewardListener;
 import maurxp.betterdragon.reward.service.RewardService;
 import org.junit.jupiter.api.BeforeEach;

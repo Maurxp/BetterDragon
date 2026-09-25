@@ -1,7 +1,6 @@
 package maurxp.betterdragon.persistence;
 
 import maurxp.betterdragon.battle.model.BattleId;
-import maurxp.betterdragon.reward.claim.ClaimStorage;
 import maurxp.betterdragon.reward.claim.SQLiteClaimStorage;
 import maurxp.betterdragon.reward.delivery.PlayerInventoryAdapter;
 import maurxp.betterdragon.reward.delivery.RewardDeliveryService;

@@ -1,6 +1,5 @@
 package maurxp.betterdragon.config;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 

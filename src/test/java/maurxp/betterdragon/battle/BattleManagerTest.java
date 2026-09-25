@@ -3,7 +3,6 @@ package maurxp.betterdragon.battle;
 import maurxp.betterdragon.battle.model.BattleAbortReason;
 import maurxp.betterdragon.battle.model.BattleId;
 import maurxp.betterdragon.battle.model.BattleState;
-import maurxp.betterdragon.battle.model.DragonIdentity;
 import maurxp.betterdragon.config.ConfigurationService;
 import maurxp.betterdragon.util.BetterDragonKeys;
 import org.bukkit.Location;

@@ -1,6 +1,5 @@
 package maurxp.betterdragon.config;
 
-import java.util.Objects;
 import java.util.Optional;
 
 /**

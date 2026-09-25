@@ -11,12 +11,10 @@ import maurxp.betterdragon.leaderboard.model.LeaderboardPlayerStats;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
-import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.UUID;
 
 /**

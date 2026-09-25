@@ -8,8 +8,6 @@ import org.bukkit.boss.BarStyle;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("Pruebas Unitarias de DragonBossBar y Cálculo de Progreso (Fase 3.14)")

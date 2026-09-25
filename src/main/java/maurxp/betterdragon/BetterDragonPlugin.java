@@ -27,7 +27,6 @@ import maurxp.betterdragon.combat.CombatRuntime;
 import maurxp.betterdragon.combat.CombatSnapshot;
 import maurxp.betterdragon.combat.DragonCombatListener;
 import maurxp.betterdragon.combat.ParticipantSnapshot;
-import maurxp.betterdragon.arena.ArenaRuleSet;
 import maurxp.betterdragon.config.ArenaConfigurationSnapshot;
 import maurxp.betterdragon.config.BattleConfigurationSnapshot;
 import maurxp.betterdragon.config.ConfigurationService;
@@ -45,19 +44,15 @@ import maurxp.betterdragon.leaderboard.service.LeaderboardService;
 import maurxp.betterdragon.leaderboard.storage.LeaderboardStorage;
 import maurxp.betterdragon.leaderboard.storage.SQLiteLeaderboardStorage;
 import maurxp.betterdragon.persistence.DatabaseManager;
-import maurxp.betterdragon.persistence.SchemaInitializer;
 import maurxp.betterdragon.reward.allocation.RewardAllocationEngine;
 import maurxp.betterdragon.reward.claim.ClaimStorage;
-import maurxp.betterdragon.reward.claim.InMemoryClaimStorage;
 import maurxp.betterdragon.reward.claim.SQLiteClaimStorage;
 import maurxp.betterdragon.reward.delivery.BukkitPlayerInventoryAdapter;
 import maurxp.betterdragon.reward.delivery.PlayerInventoryAdapter;
 import maurxp.betterdragon.reward.delivery.RewardDeliveryService;
 import maurxp.betterdragon.reward.event.BetterDragonRewardEvent;
 import maurxp.betterdragon.reward.event.RewardEventDispatcher;
-import maurxp.betterdragon.reward.model.ClaimStatus;
 import maurxp.betterdragon.reward.model.RewardAllocationPlan;
-import maurxp.betterdragon.reward.model.RewardClaim;
 import maurxp.betterdragon.reward.service.DragonRewardListener;
 import maurxp.betterdragon.reward.service.RewardService;
 import maurxp.betterdragon.util.BetterDragonKeys;
@@ -1474,7 +1469,7 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
 
                     // 9. Verificar idempotencia estricta: re-procesar no duplica reclamos ni eventos
                     int claimsBeforeRetry = claimStorage.findByBattleId(testBattleId).join().size();
-                    RewardAllocationPlan retryPlan = rewardService.processVictory(result);
+                    rewardService.processVictory(result);
                     int claimsAfterRetry = claimStorage.findByBattleId(testBattleId).join().size();
 
                     if (claimsBeforeRetry != claimsAfterRetry) {

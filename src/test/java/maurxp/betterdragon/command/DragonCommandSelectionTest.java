@@ -2,7 +2,6 @@ package maurxp.betterdragon.command;
 
 import maurxp.betterdragon.application.arena.ArenaQueryService;
 import maurxp.betterdragon.application.battle.BattleAdminService;
-import maurxp.betterdragon.application.permission.BukkitPermissionChecker;
 import maurxp.betterdragon.application.permission.CommandPermission;
 import maurxp.betterdragon.battle.BattleManager;
 import maurxp.betterdragon.battle.BattleSessionManager;

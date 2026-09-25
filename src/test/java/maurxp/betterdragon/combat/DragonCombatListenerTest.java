@@ -3,7 +3,6 @@ package maurxp.betterdragon.combat;
 import maurxp.betterdragon.battle.BattleSessionManager;
 import org.bukkit.entity.ComplexEntityPart;
 import org.bukkit.entity.EnderDragon;
-import org.bukkit.entity.EnderDragonPart;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;

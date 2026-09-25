@@ -1,6 +1,5 @@
 package maurxp.betterdragon.phase;
 
-import maurxp.betterdragon.ability.AbilityCooldownTracker;
 import maurxp.betterdragon.ability.AbilityEngine;
 import maurxp.betterdragon.battle.BattleSession;
 import maurxp.betterdragon.battle.model.BattleId;

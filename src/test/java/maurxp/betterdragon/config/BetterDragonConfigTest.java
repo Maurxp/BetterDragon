@@ -1,6 +1,5 @@
 package maurxp.betterdragon.config;
 
-import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

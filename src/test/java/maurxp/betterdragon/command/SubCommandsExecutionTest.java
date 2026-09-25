@@ -5,7 +5,6 @@ import maurxp.betterdragon.application.arena.ArenaQueryService;
 import maurxp.betterdragon.application.battle.BattleAdminService;
 import maurxp.betterdragon.application.leaderboard.LeaderboardApplicationService;
 import maurxp.betterdragon.application.permission.BukkitPermissionChecker;
-import maurxp.betterdragon.application.permission.CommandPermission;
 import maurxp.betterdragon.application.reward.RewardApplicationService;
 import maurxp.betterdragon.battle.BattleManager;
 import maurxp.betterdragon.battle.BattleSessionManager;
@@ -38,7 +37,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;

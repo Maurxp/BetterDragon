@@ -2,7 +2,6 @@ package maurxp.betterdragon.battle;
 
 import maurxp.betterdragon.ability.AbilityEngine;
 import maurxp.betterdragon.battle.model.BattleId;
-import maurxp.betterdragon.battle.model.BattleState;
 import maurxp.betterdragon.battle.model.DragonIdentity;
 import maurxp.betterdragon.config.BattleConfigurationSnapshot;
 import maurxp.betterdragon.config.DragonBossBarDefinition;

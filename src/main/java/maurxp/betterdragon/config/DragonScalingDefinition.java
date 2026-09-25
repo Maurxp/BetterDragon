@@ -1,6 +1,5 @@
 package maurxp.betterdragon.config;
 
-import java.util.Objects;
 
 /**
  * Configuración inmutable del modelo de escalado de un dragón según jugadores en arena.
