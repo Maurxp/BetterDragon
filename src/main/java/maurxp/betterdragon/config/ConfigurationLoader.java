@@ -6,6 +6,8 @@ import maurxp.betterdragon.ability.AbilityTrigger;
 import maurxp.betterdragon.ability.EffectOriginType;
 import maurxp.betterdragon.ability.TargetSelectorType;
 import maurxp.betterdragon.phase.PhaseDefinition;
+import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarStyle;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -439,6 +441,93 @@ public final class ConfigurationLoader {
                         }
                     }
 
+                    // bossbar (Fase 3.14)
+                    DragonBossBarDefinition bossbar = DragonBossBarDefinition.defaults();
+                    if (dSec.contains("bossbar")) {
+                        ConfigurationSection bbSec = dSec.getConfigurationSection("bossbar");
+                        if (bbSec == null) {
+                            errors.add("Dragón '" + rawDragonKey + "': la sección 'bossbar' debe ser un mapa.");
+                        } else {
+                            boolean bbEnabled = bbSec.getBoolean("enabled", true);
+                            String bbTitle = bbSec.getString("title", DragonBossBarDefinition.DEFAULT_TITLE);
+                            if (bbTitle == null || bbTitle.isBlank()) {
+                                errors.add("Dragón '" + rawDragonKey + "': 'bossbar.title' no puede estar vacío.");
+                                bbTitle = DragonBossBarDefinition.DEFAULT_TITLE;
+                            }
+                            BarColor bbColor = DragonBossBarDefinition.DEFAULT_COLOR;
+                            if (bbSec.contains("color")) {
+                                String rawColor = bbSec.getString("color");
+                                if (rawColor != null) {
+                                    try {
+                                        bbColor = BarColor.valueOf(rawColor.toUpperCase().trim());
+                                    } catch (IllegalArgumentException e) {
+                                        errors.add("Dragón '" + rawDragonKey + "': 'bossbar.color' inválido '" + rawColor + "'.");
+                                    }
+                                }
+                            }
+                            BarStyle bbStyle = DragonBossBarDefinition.DEFAULT_STYLE;
+                            if (bbSec.contains("style")) {
+                                String rawStyle = bbSec.getString("style");
+                                if (rawStyle != null) {
+                                    try {
+                                        bbStyle = BarStyle.valueOf(rawStyle.toUpperCase().trim());
+                                    } catch (IllegalArgumentException e) {
+                                        errors.add("Dragón '" + rawDragonKey + "': 'bossbar.style' inválido '" + rawStyle + "'.");
+                                    }
+                                }
+                            }
+                            try {
+                                bossbar = new DragonBossBarDefinition(bbEnabled, bbTitle, bbColor, bbStyle);
+                            } catch (IllegalArgumentException e) {
+                                errors.add("Dragón '" + rawDragonKey + "': " + e.getMessage());
+                            }
+                        }
+                    }
+
+                    // enrage (Fase 3.14)
+                    DragonEnrageDefinition enrage = DragonEnrageDefinition.defaults();
+                    if (dSec.contains("enrage")) {
+                        ConfigurationSection enrSec = dSec.getConfigurationSection("enrage");
+                        if (enrSec == null) {
+                            errors.add("Dragón '" + rawDragonKey + "': la sección 'enrage' debe ser un mapa.");
+                        } else {
+                            boolean enrEnabled = enrSec.getBoolean("enabled", true);
+                            double enrThreshold = DragonEnrageDefinition.DEFAULT_THRESHOLD;
+                            if (enrSec.contains("threshold")) {
+                                Object rawThresh = enrSec.get("threshold");
+                                if (rawThresh instanceof Number n) {
+                                    double val = n.doubleValue();
+                                    if (!Double.isFinite(val) || val <= 0.0 || val > 1.0) {
+                                        errors.add("Dragón '" + rawDragonKey + "': 'enrage.threshold' debe ser un número finito en (0.0, 1.0]. Se encontró: " + val);
+                                    } else {
+                                        enrThreshold = val;
+                                    }
+                                } else {
+                                    errors.add("Dragón '" + rawDragonKey + "': 'enrage.threshold' debe ser un número.");
+                                }
+                            }
+                            double enrMultiplier = DragonEnrageDefinition.DEFAULT_COOLDOWN_MULTIPLIER;
+                            Object rawMult = enrSec.contains("cooldown_multiplier") ? enrSec.get("cooldown_multiplier") : enrSec.get("cooldown-multiplier");
+                            if (rawMult != null) {
+                                if (rawMult instanceof Number n) {
+                                    double val = n.doubleValue();
+                                    if (!Double.isFinite(val) || val <= 0.0) {
+                                        errors.add("Dragón '" + rawDragonKey + "': 'enrage.cooldown_multiplier' debe ser un número finito > 0.0. Se encontró: " + val);
+                                    } else {
+                                        enrMultiplier = val;
+                                    }
+                                } else {
+                                    errors.add("Dragón '" + rawDragonKey + "': 'enrage.cooldown_multiplier' debe ser un número.");
+                                }
+                            }
+                            try {
+                                enrage = new DragonEnrageDefinition(enrEnabled, enrThreshold, enrMultiplier);
+                            } catch (IllegalArgumentException e) {
+                                errors.add("Dragón '" + rawDragonKey + "': " + e.getMessage());
+                            }
+                        }
+                    }
+
                     // phases
                     List<?> rawPhases = dSec.getList("phases");
                     if (rawPhases == null || rawPhases.isEmpty()) {
@@ -493,6 +582,8 @@ public final class ConfigurationLoader {
                                         displayName,
                                         attributes,
                                         scaling,
+                                        bossbar,
+                                        enrage,
                                         phases,
                                         abilitiesCatalog
                                 );

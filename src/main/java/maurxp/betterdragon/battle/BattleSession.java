@@ -16,6 +16,7 @@ import maurxp.betterdragon.combat.CombatRuntime;
 import maurxp.betterdragon.combat.CombatSnapshot;
 import maurxp.betterdragon.config.BattleConfigurationSnapshot;
 import maurxp.betterdragon.phase.PhaseRuntime;
+import maurxp.betterdragon.presentation.DragonBossBar;
 import org.bukkit.entity.EnderDragon;
 
 import java.time.Instant;
@@ -64,6 +65,7 @@ public class BattleSession {
     private final CombatRuntime combatRuntime;
     private final PhaseRuntime phaseRuntime;
     private final AbilityEngine abilityEngine;
+    private final DragonBossBar bossBar;
 
     private BattleState state;
     private DragonIdentity dragonIdentity;
@@ -71,6 +73,7 @@ public class BattleSession {
     private Instant completedAt;
     private BattleState stateBeforeChunkDeferral;
     private BattleResult result;
+    private boolean enrageActive = false;
 
     public BattleSession(BattleId battleId, String worldName, UUID worldUniqueId,
             BattleConfigurationSnapshot configSnapshot) {
@@ -94,6 +97,11 @@ public class BattleSession {
                 null
         );
         this.phaseRuntime = new PhaseRuntime(this, configSnapshot.dragonDefinition().phases(), this.abilityEngine, null);
+        this.bossBar = new DragonBossBar(
+                this.battleId,
+                configSnapshot.dragonDefinition().bossbar(),
+                configSnapshot.dragonDefinition().displayName()
+        );
     }
 
     public BattleSession(BattleId battleId, String worldName, UUID worldUniqueId) {
@@ -155,6 +163,8 @@ public class BattleSession {
         transitionTo(BattleState.ACTIVE);
         this.dragonIdentity = dragonIdentity;
         this.activatedAt = Instant.now();
+        this.bossBar.setVisible(true);
+        syncBossBarViewers();
     }
 
     /**
@@ -162,6 +172,7 @@ public class BattleSession {
      * Transición: ACTIVE -> DYING.
      */
     public void beginDying() {
+        this.bossBar.cleanup();
         transitionTo(BattleState.DYING);
     }
 
@@ -178,6 +189,7 @@ public class BattleSession {
         if (this.state == BattleState.COMPLETED && this.result != null) {
             return this.result;
         }
+        this.bossBar.cleanup();
         transitionTo(BattleState.COMPLETED);
         this.completedAt = Instant.now();
 
@@ -227,6 +239,7 @@ public class BattleSession {
         if (this.state == BattleState.ABORTED && this.result != null) {
             return this.result;
         }
+        this.bossBar.cleanup();
         transitionTo(BattleState.ABORTED);
         this.completedAt = Instant.now();
 
@@ -249,6 +262,7 @@ public class BattleSession {
                             + this.state);
         }
         this.stateBeforeChunkDeferral = this.state;
+        this.bossBar.setVisible(false);
         transitionTo(BattleState.DEFERRED_PENDING_CHUNK_LOAD);
     }
 
@@ -264,6 +278,8 @@ public class BattleSession {
                 : BattleState.ACTIVE;
         this.stateBeforeChunkDeferral = null;
         transitionTo(targetState);
+        this.bossBar.setVisible(true);
+        syncBossBarViewers();
     }
 
     private void transitionTo(BattleState next) {
@@ -408,6 +424,103 @@ public class BattleSession {
     }
 
     /**
+     * Retorna el controlador de presentación de la BossBar para esta sesión.
+     *
+     * @return instancia de DragonBossBar
+     */
+    public DragonBossBar getBossBar() {
+        return bossBar;
+    }
+
+    /**
+     * Retorna si el estado Soft Enrage está activo en esta sesión de combate.
+     *
+     * @return true si el dragón está en Soft Enrage
+     */
+    public boolean isEnrageActive() {
+        return enrageActive;
+    }
+
+    /**
+     * Evalúa si la salud actual cruza el umbral de activación de Soft Enrage.
+     * <p>
+     * Garantía de Monotonicidad:
+     * Una vez activado (false -> true), jamás regresa a false durante la misma batalla,
+     * incluso si la salud se recupera posteriormente por cristales del End.
+     *
+     * @param currentHealth salud actual
+     * @param maxHealth     salud máxima
+     * @return true si Enrage está activo (recién activado o previamente activo)
+     */
+    public boolean checkEnrage(double currentHealth, double maxHealth) {
+        if (this.enrageActive) {
+            return true;
+        }
+        var enrage = configSnapshot.dragonDefinition().enrage();
+        if (enrage == null || !enrage.enabled()) {
+            return false;
+        }
+        if (!Double.isFinite(currentHealth) || !Double.isFinite(maxHealth) || maxHealth <= 0.0) {
+            return false;
+        }
+        double ratio = currentHealth / maxHealth;
+        if (!Double.isFinite(ratio) || Double.isNaN(ratio)) {
+            return false;
+        }
+        if (ratio <= enrage.threshold()) {
+            this.enrageActive = true;
+            this.bossBar.setEnraged(true);
+            this.bossBar.playEnrageFeedback();
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Actualiza la salud en la BossBar y evalúa la activación de Soft Enrage.
+     *
+     * @param currentHealth salud actual
+     * @param maxHealth     salud máxima
+     */
+    public void updateDragonHealth(double currentHealth, double maxHealth) {
+        this.bossBar.updateHealth(currentHealth, maxHealth);
+        checkEnrage(currentHealth, maxHealth);
+    }
+
+    /**
+     * Sincroniza los espectadores de la BossBar con los jugadores válidos presentes en la arena.
+     */
+    public void syncBossBarViewers() {
+        if (!isActive()) {
+            return;
+        }
+        try {
+            if (org.bukkit.Bukkit.getServer() == null) {
+                return;
+            }
+            org.bukkit.World world = org.bukkit.Bukkit.getWorld(this.worldUniqueId);
+            if (world == null) {
+                world = org.bukkit.Bukkit.getWorld(this.worldName);
+            }
+            if (world == null) {
+                return;
+            }
+            java.util.List<org.bukkit.entity.Player> eligible = new java.util.ArrayList<>();
+            for (org.bukkit.entity.Player p : world.getPlayers()) {
+                if (p != null && p.isOnline() && !p.isDead()) {
+                    if (this.spatialContext == null || this.spatialContext.getBounds() == null
+                            || this.spatialContext.isInArena(p.getLocation())) {
+                        eligible.add(p);
+                    }
+                }
+            }
+            this.bossBar.updateViewers(eligible);
+        } catch (Exception ignored) {
+            // Protección ante entornos de pruebas o excepciones de Bukkit
+        }
+    }
+
+    /**
      * Ejecuta el ciclo periódico de actualización de combate, fases y habilidades.
      *
      * @param currentTick tick lógico del servidor
@@ -417,6 +530,17 @@ public class BattleSession {
         if (!isActive() || dragon == null || !dragon.isValid()) {
             return;
         }
+        double maxHealth = 200.0;
+        try {
+            if (dragon.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH) != null) {
+                maxHealth = dragon.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH).getValue();
+            } else {
+                maxHealth = dragon.getMaxHealth();
+            }
+        } catch (Exception ignored) {
+        }
+        updateDragonHealth(dragon.getHealth(), maxHealth);
+        syncBossBarViewers();
         this.phaseRuntime.tick(currentTick, dragon);
     }
 }

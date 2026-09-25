@@ -778,11 +778,11 @@ BetterDragon 3.11 establece una frontera formal entre las capas de entrada (CLI 
 
 ### 14.1 Componentes del Dominio:
 - **`DragonCatalog` (`config`):** Catálogo inmutable de perfiles de dragón (`DragonDefinition`) cargados desde `config.yml` (sección `dragons:`). Soporta múltiples perfiles, normalización insensible a mayúsculas, y resolución segura de perfiles default vs explícitos.
-- **`DragonAttributes` (`config`):** Encapsula los atributos nativos de Paper API:
-  - `Attribute.MAX_HEALTH` (Base obligatoria, por defecto 200.0 HP).
-  - `Attribute.MOVEMENT_SPEED` (Opcional, velocidad de vuelo Paper).
-  - `Attribute.FOLLOW_RANGE` (Opcional, rango de seguimiento de IA).
-  - `Attribute.ATTACK_DAMAGE` (Opcional, daño de ataque melee).
+- **`DragonAttributes` (`config`):** Encapsula los atributos de Paper API:
+  - `Attribute.MAX_HEALTH` (Base obligatoria, por defecto 200.0 HP; disponible/observado).
+  - `Attribute.MOVEMENT_SPEED` (Opcional; disponible/observado; comportamiento físico locomotor no afirmado sin prueba).
+  - `Attribute.FOLLOW_RANGE` (Opcional; disponible/observado; comportamiento IA no afirmado sin prueba).
+  - `Attribute.ATTACK_DAMAGE` (**No disponible nativamente** en la entidad `EnderDragon` en Paper 26.1.2-74; retorna `null`).
   - *Exclusión:* `Attribute.SCALE` rechazado formalmente debido a que las partes multipart (`EnderDragonPart`) no escalan en el motor vanilla (MC-267372).
 - **`DragonScalingDefinition` & `ScalingMode` (`config`):** Modelo declarativo de escalado. En 3.13-R1 se consolida la **Semántica Opción A**:
   - `enabled: true` sin `mode` infiere automáticamente `ScalingMode.LINEAR`.
@@ -807,3 +807,57 @@ Todo dragón generado por BetterDragon porta síncronamente 4 claves en su `Pers
 - Eliminación total de coordenadas mágicas históricas (`0.5, 128.0, 0.5`).
 - Derivación estricta desde `ArenaDefinition`: `arena.center().toLocation(world)` y podio `dragon.setPodium(arena.podium().toLocation(world))`.
 - Cero silenciamiento de excepciones: eliminación de `catch (Throwable ignored)`. Toda advertencia de atributos o podio es registrada con `Level.WARNING` para auditoría y trazabilidad operacional.
+
+---
+
+## 15. Encounter Presentation y Soft Enrage (Fase 3.14 / 3.14-R1)
+
+### 15.1 Arquitectura de Presentación (BossBar Propia):
+- **Soberanía y Separación Estricta:** La supresión de la BossBar vanilla original permanece confinada a la capa de plataforma (`platform.bossbar` con NMS aislado). La BossBar propia de BetterDragon opera con **0% NMS** utilizando directamente la API pública de Bukkit (`org.bukkit.boss.BossBar` vía `Bukkit.createBossBar`).
+- **Controlador por Sesión (`DragonBossBar`):** Cada `BattleSession` posee su propia instancia de `DragonBossBar`. Cero gestores globales o singletons de interfaz de usuario.
+- **Cálculo Robusto de Progreso:** La relación de salud se computa mediante `DragonBossBar.calculateProgress(currentHealth, maxHealth)`:
+  - Garantiza estrictamente un valor normalizado dentro del intervalo $[0.0, 1.0]$.
+  - Filtra y neutraliza `Double.NaN`, `Double.isInfinite`, valores de salud negativos y denominadores $\le 0.0$ retornando `0.0`.
+  - La salud de la entidad física real y el runtime de combate continúan siendo la única fuente de verdad (sin vida paralela artificial).
+- **Semántica Explícita de Placeholder `{enrage}` (Fase 3.14-R1):**
+  - Si el título configurado contiene `{enrage}`, se reemplaza por `&c[ENRAGE]` cuando la batalla está en enrage, o por cadena vacía `""` cuando no lo está.
+  - Si el título NO contiene `{enrage}`, **nunca** se anexa automáticamente ninguna etiqueta de enrage.
+- **Gestión Determinista de Espectadores:**
+  - Sincronización en hilo principal (`syncBossBarViewers()`) evaluando a los jugadores presentes dentro de los límites espaciales de la arena (`spatialContext.isInArena(player.getLocation())`).
+  - `DragonPresentationListener` asegura remoción inmediata de espectadores ante eventos de `PlayerQuitEvent`, `PlayerDeathEvent` y resincronización limpia en `PlayerTeleportEvent` y `PlayerRespawnEvent`, eliminando cualquier riesgo de barras fantasma o referencias colgantes.
+- **Eliminación de `catch (Throwable ignored)` (Hardening 3.14-R1):**
+  - Todas las operaciones de creación de BossBar, audio, gestión de espectadores y cleanup utilizan excepciones tipadas (`Exception`) con logging contextual (`Level.WARNING` / `Level.FINE`), sin silenciar errores graves.
+- **Ciclo de Vida Integrado:**
+  - En estado `ACTIVE`: barra visible, progreso y título sincronizados.
+  - En estados terminales `DYING`, `COMPLETED` y `ABORTED`: invocación síncrona de `DragonBossBar.cleanup()` que ejecuta `removeAll()`, oculta la barra y purga el conjunto interno de espectadores.
+  - En estado `DEFERRED_PENDING_CHUNK_LOAD`: la barra se oculta temporalmente sin expulsar el estado de sesión ni tratar la descarga de chunk como muerte del dragón.
+  - En `onDisable()` del plugin: limpieza masiva de todas las BossBars activas.
+
+### 15.2 Feedback Sensorial de Transición de Fases:
+- **Evento de Dominio Desacoplado:** Reutilización directa de `BetterDragonPhaseChangeEvent` emitido por `PhaseRuntime` al detectar avance monotónico de fase.
+- **Audio Real y BossBar:** `DragonPresentationListener` actualiza el título visible en la BossBar y reproduce `Sound.ENTITY_ENDER_DRAGON_GROWL` (volumen 1.0, pitch 1.0) a todos los espectadores de la batalla. **No se utiliza ni afirma `sendTitle()` en pantalla.**
+
+### 15.3 Modificador Transversal Soft Enrage:
+- **Desacoplamiento Conceptual:** Enrage **NO** es una fase de combate (`CombatPhase`); las fases definen la secuencia de progresión (ej. Phase 1 a Phase 4), mientras que Enrage es un estado modificador transversal que puede coexistir con cualquier fase (incluyendo Phase 4 + Enrage).
+- **Activación Determinista y Monotónica:**
+  - Se activa cuando $\text{healthRatio} \le \text{threshold}$ (por defecto $0.20$, catalogado como `TUNING_CANDIDATE`).
+  - Monotonicidad estricta ($false \to true$ irreversible): una vez activado, jamás regresa a $false$ durante la misma batalla, incluso si el dragón regenera su salud al 100% mediante cristales de End.
+  - Activación única: reproduce sonido temático (`Sound.ENTITY_ENDER_DRAGON_GROWL`, volumen 1.2, pitch 0.8) exactamente una vez.
+- **Aceleración Efectiva de Cooldowns de Habilidades:**
+  - En la Fase 3.14, el único efecto funcional de Soft Enrage consiste en modificar el cooldown efectivo de habilidades ejecutadas por `AbilityEngine`:
+    $$\text{EffectiveCooldown} = \max(1, \text{round}(\text{BaseCooldown} \times \text{cooldownMultiplier}))$$
+  - Interpretación de `cooldownMultiplier`: `< 1.0` (cooldown más corto), `= 1.0` (sin cambio), `> 1.0` (cooldown más largo).
+  - `cooldownMultiplier` por defecto es $0.75$ (`TUNING_CANDIDATE`).
+  - La definición inmutable original de la habilidad (`AbilityDefinition.cooldownTicks()`) permanece intacta sin mutaciones.
+- **Aislamiento en Snapshot ante Reload:**
+  - `DragonBossBarDefinition` y `DragonEnrageDefinition` están encapsulados en `DragonDefinition` y congelados en `BattleConfigurationSnapshot`.
+  - La ejecución de `/betterdragon reload` no afecta a ninguna batalla activa (conservan su título, color, estilo, umbral y multiplicador originales). Las nuevas batallas sí adoptan la configuración recargada.
+
+### 15.4 Validación Runtime (EXP-009 — 11/11 Checks PASS):
+- Validado empíricamente sobre Paper 26.1.2-74 (Java 25) durante la auditoría de integración EXP-009 (11 checks verificados exitosamente con exit code 0).
+- Clasificación de evidencias de atributos nativos en `EnderDragon`:
+  - `Attribute.MAX_HEALTH`: Disponible y configurable (`200.0` HP base observado).
+  - `Attribute.MOVEMENT_SPEED`: Disponible/observado (`0.7` base; comportamiento locomotor no afirmado sin pruebas físicas independientes: `NOT INDEPENDENTLY VERIFIED`).
+  - `Attribute.FOLLOW_RANGE`: Disponible/observado (`17.77` base; comportamiento IA no afirmado sin pruebas físicas independientes: `NOT INDEPENDENTLY VERIFIED`).
+  - `Attribute.ATTACK_DAMAGE`: **No disponible / null** nativamente en la entidad `EnderDragon` en Paper 26.1.2-74 (`dragon.getAttribute(Attribute.ATTACK_DAMAGE) == null`).
+  - `dragon.setPodium(Location)`: API invocation smoke test ejecutado con éxito (postcondición interna no expuesta en Bukkit API: `VERIFIED BY RUNTIME SMOKE TEST`).

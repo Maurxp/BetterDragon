@@ -38,9 +38,9 @@
 ## 2. Decisiones Arquitectónicas Firmes (Decisions)
 
 ### DEC-01: Control de Atributos Nativos mediante Paper API
-* **Status:** `DECISION (CONSOLIDADA / IMPLEMENTADA EN FASE 3.13)`
+* **Status:** `DECISION (CONSOLIDADA / IMPLEMENTADA EN FASE 3.13 / AUDITADA EN 3.14-R1)`
 * **Evidence:** `Paper Javadoc: LivingEntity#getAttribute(Attribute)` (`SOURCE_CODE / HIGH`).
-* **Rationale:** Permite calibrar la vida máxima (`Attribute.MAX_HEALTH`), velocidad (`MOVEMENT_SPEED`), rango de seguimiento (`FOLLOW_RANGE`) y daño de ataque (`ATTACK_DAMAGE`) sin recurrir a paquetes internos de servidor.
+* **Rationale:** Permite calibrar la vida máxima (`Attribute.MAX_HEALTH`), velocidad (`MOVEMENT_SPEED`) y rango de seguimiento (`FOLLOW_RANGE`) mediante Paper API (`ATTACK_DAMAGE` no se encuentra expuesto en `EnderDragon` en Paper 26.1.2-74; retorna `null`).
 * **Consequences:** Soporte transparente de perfiles de atributos cargados desde configuración (`DragonAttributes`), aplicados de forma segura en `DragonSpawner`.
 * **Validation Needed:** Validado con tests unitarios en `DragonAttributesTest` y `DragonSpawnerTest`.
 * **Implementation Target:** Fase 3.13 (Completada).
@@ -67,6 +67,22 @@
 * **Consequences:** Cero pérdidas de ítems y erradicación del *kill stealing*.
 * **Validation Needed:** Ya validado con 314 tests automáticos.
 * **Implementation Target:** Fases 3.7, 3.8, 3.9, 3.10 (Completadas).
+
+### DEC-05: BossBar Propia Independiente con Clamping Seguro, Semántica Explícita de {enrage} y Cero NMS en Presentación
+* **Status:** `DECISION (IMPLEMENTADA EN FASE 3.14 / REFINADA EN 3.14-R1)`
+* **Evidence:** `Bukkit.createBossBar`, `DragonBossBar.java`, `EXP-009` (`OBSERVED / HIGH`).
+* **Rationale:** La presentación visual del dragón debe ser autónoma, permitiendo personalizar título, color y segmentación, y reflejando transiciones de fase y Soft Enrage. La supresión vanilla permanece en el adaptador de plataforma (NMS), pero la presentación de BetterDragon opera con **0% NMS** vía Paper API. El cálculo de progreso está matemáticamente acotado a `[0.0, 1.0]`, protegiendo contra `NaN`, `Infinity` o desbordamientos. En 3.14-R1 se implementa semántica explícita para `{enrage}` (si está presente: activo -> `&c[ENRAGE]`, inactivo -> `""`; si no está presente: nunca se añade automáticamente). Se elimina `catch (Throwable ignored)` sustituyéndolo por logging contextual tipado.
+* **Consequences:** Eliminación de barras vanilla, visualización inmersiva de la fase y salud real de la batalla activa, y personalización limpia del título.
+* **Validation Needed:** Validada empíricamente en Paper 26.1.2-74 (EXP-009: 11 checks) y tests unitarios.
+* **Implementation Target:** Fase 3.14 / 3.14-R1 (Completada).
+
+### DEC-06: Soft Enrage como Modificador Transversal Global
+* **Status:** `DECISION (IMPLEMENTADA EN FASE 3.14 / REFINADA EN 3.14-R1)`
+* **Evidence:** `BattleSession.java`, `AbilityEngine.java`, `EXP-009` (`OBSERVED / HIGH`).
+* **Rationale:** Enrage no es una fase de combate secuencial; es un modificador transversal que coexiste con cualquier fase. Debe ser estrictamente monotónico ($false \to true$ irreversible) para que regeneraciones posteriores no reviertan el estado de furia. En Fase 3.14 su efecto funcional consiste en acelerar el cooldown efectivo de habilidades compatibles mediante un multiplicador configurado (`cooldownMultiplier`; `< 1.0` más corto, `= 1.0` sin cambio, `> 1.0` más largo), sin mutar las definiciones inmutables de las habilidades. El feedback sensorial consiste en audio temático (`Sound.ENTITY_ENDER_DRAGON_GROWL`); no se utiliza `sendTitle` en pantalla.
+* **Consequences:** Mayor dinamismo en el tramo final del combate sin generar sobrearquitectura de eventos o scripts.
+* **Validation Needed:** Validada empíricamente en Paper 26.1.2-74 (EXP-009: 11 checks). Los valores por defecto (`threshold: 0.20`, `multiplier: 0.75`) continúan clasificados como candidatos de tuning (`TUNING_CANDIDATE`).
+* **Implementation Target:** Fase 3.14 / 3.14-R1 (Completada).
 
 ---
 
@@ -168,6 +184,7 @@
 | **Scaling Cap** | `3.0x` | `TUNING_CANDIDATE` | Límite superior para evitar que grupos masivos generen esponjas de 10k HP. | Medición de fatiga de combate. |
 | **Bed Damage Mult.** | `0.05` | `TUNING_CANDIDATE` | Reduce el daño de camas en 95%, volviendo la estrategia ineficiente. | Prueba de combate con camas (`EXP-004`). |
 | **Enrage Threshold** | `0.20` | `TUNING_CANDIDATE` | Se activa cuando la vida cae por debajo del 20%. | Medición de picos de tensión al cierre. |
+| **Enrage Cooldown Mult.** | `0.75` | `TUNING_CANDIDATE` | Acelera la recarga de habilidades un 25% durante Enrage. | Validación runtime (`EXP-009`) y playtests. |
 | **Counterattack Cooldown**| `5.0 s` | `TUNING_CANDIDATE` | Límite de un contragolpe cada 5s por jugador para evitar spam. | Pruebas de fuego rápido con arco. |
 
 ---

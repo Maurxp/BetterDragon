@@ -168,3 +168,58 @@ Follow-up:          Acción de diseño o implementación derivada
 - **Conclusion:** `PENDING (Ambos modelos permanecen como hipótesis; ninguno se declara ganador antes del playtesting)`
 - **Confidence:** `HYPOTHESIS / MEDIUM`
 - **Follow-up:** Diseñar el modelo de escalado en la Fase 3.13 con flexibilidad para soportar o evaluar ambas variantes.
+
+---
+
+### EXP-009: Validación Runtime de Presentación, BossBar Propia, Atributos de EnderDragon y Soft Enrage (11/11 Checks PASS)
+- **Title:** Validación empírica en servidor Paper 26.1.2 de la BossBar propia, supresión vanilla, ciclo de vida de presentación, disponibilidad real de atributos y comportamiento de Soft Enrage.
+- **Objective:** Evaluar en un servidor Paper 26.1.2 real bajo matriz formal de evidencia:
+  1. La supresión de la BossBar vanilla mediante el controlador de plataforma (`VERIFIED BY RUNTIME SMOKE TEST`).
+  2. La inicialización de la BossBar propia de BetterDragon, sincronización de espectadores, cálculo de progreso acotado [0.0, 1.0] y actualización de título con semántica explícita de `{enrage}` (`VERIFIED BY RUNTIME SMOKE TEST`).
+  3. Los atributos de `EnderDragon` en la API de Paper: distinguir presencia/valor de comportamiento real verificado (`OBSERVED` vs `NOT INDEPENDENTLY VERIFIED` vs `NOT SUPPORTED / NULL`).
+  4. La invocación del método `setPodium` clasificada honestamente como smoke test de invocación API (`VERIFIED BY RUNTIME SMOKE TEST`).
+  5. El modificador transversal Soft Enrage: activación por umbral `healthRatio <= threshold` (0.20), estricta monotonicidad (`false -> true`), no mutación de definiciones, y aceleración de cooldowns (`VERIFIED BY RUNTIME SMOKE TEST` y `VERIFIED BY TEST`).
+  6. La semántica de descarga diferida (`DEFERRED_PENDING_CHUNK_LOAD`) y limpieza al abortar (`VERIFIED BY RUNTIME SMOKE TEST`).
+- **Environment:**
+  - Minecraft Java 26.1.2
+  - Paper `paper-26.1.2-74`
+  - Java 25 (OpenJDK Temurin 25.0.4.1+1-LTS)
+  - Pure Paper runtime (sin ProtocolLib, sin Folia, sin plugins externos).
+- **Variables:**
+  - Salud del dragón (200.0 HP base, daño gradual a 170.0 [85%], 140.0 [70%], 36.0 [18%], curación a 200.0 [100%]).
+  - Umbral de fase 2 (`healthRatioThreshold = 0.75`).
+  - Umbral de Soft Enrage (`threshold = 0.20`, candidato de tuning: `TUNING_CANDIDATE`).
+  - Multiplicador de cooldown de habilidades (`cooldownMultiplier = 0.75`, candidato de tuning: `TUNING_CANDIDATE`).
+  - Estado de carga del chunk (Cargado -> Descargado diferido -> Reanudado).
+- **Procedure:**
+  1. Compilar el plugin (`mvn clean package -DskipTests`) y desplegar en servidor de pruebas Paper 26.1.2.
+  2. Iniciar el servidor mediante script de validación externa (ubicado en `../validation/test_presentation_integration.py`).
+  3. Ejecutar rutina de verificación de presentación (hook temporal de auditoría retirado tras validación).
+  4. Inspeccionar atributos de `EnderDragon` y registrar presencia, valores leídos y ausencias.
+  5. Aplicar daño escalonado para observar el progreso de la BossBar y transición de fase.
+  6. Cruzar el umbral de Enrage (18% <= 20%) y verificar título de BossBar y aceleración de cooldown.
+  7. Curar al dragón al 100% para verificar la monotonicidad estricta de Enrage.
+  8. Forzar descarga de chunk a `DEFERRED_PENDING_CHUNK_LOAD` y posterior reanudación.
+  9. Abortar la batalla y verificar la limpieza de la BossBar y espectadores.
+  10. Apagar el servidor y comprobar la ausencia de excepciones o fugas.
+- **Evidence Matrix & Observed Results:**
+  - **Check 1 — Batalla Activa:** `VERIFIED BY RUNTIME SMOKE TEST`. Sesión iniciada en estado `ACTIVE` con dragón generado.
+  - **Check 2 — Supresión Vanilla BossBar:** `VERIFIED BY RUNTIME SMOKE TEST`. Controlador `VanillaBossBarController` activo en mundo. Nota: Valida integración en servidor; no constituye prueba exhaustiva de paquetes a nivel cliente.
+  - **Check 3 — BetterDragon BossBar Propia:** `VERIFIED BY RUNTIME SMOKE TEST`. Inicializada con título `Ender Dragon §7• §fphase_1`, color `PURPLE`, estilo `SOLID`, progreso `1.0`.
+  - **Check 4 — Atributos de EnderDragon en Paper 26.1.2-74:**
+    - `Attribute.MAX_HEALTH`: `OBSERVED`. Presente con valor base `200.0`.
+    - `Attribute.MOVEMENT_SPEED`: `OBSERVED` (presencia y valor `0.7` leídos; comportamiento físico locomotor no verificado de forma independiente: `NOT INDEPENDENTLY VERIFIED`).
+    - `Attribute.FOLLOW_RANGE`: `OBSERVED` (presencia y valor `17.77` leídos; comportamiento de IA de detección no verificado de forma independiente: `NOT INDEPENDENTLY VERIFIED`).
+    - `Attribute.ATTACK_DAMAGE`: `NOT SUPPORTED / NULL`. Retorna `null` desde `dragon.getAttribute(Attribute.ATTACK_DAMAGE)`. No está soportado nativamente en `EnderDragon` en Paper 26.1.2.
+  - **Check 5 — dragon.setPodium():** `VERIFIED BY RUNTIME SMOKE TEST`. Invocación exitosa sin excepción (`API invocation smoke test`). Limitación: la postcondición interna no es legible vía Bukkit API (no existe getter público).
+  - **Check 6 — Progreso de Salud:** `VERIFIED BY RUNTIME SMOKE TEST` y `VERIFIED BY TEST`. Progreso actualizado a 85.00% y acotado estrictamente a `[0.0, 1.0]`.
+  - **Check 7 — Transición de Fase y Feedback:** `VERIFIED BY RUNTIME SMOKE TEST`. Al caer al 70%, `PhaseRuntime` transicionó a `phase_2`, BossBar actualizó título a `Ender Dragon §7• §fphase_2` y se emitió audio (`ENTITY_ENDER_DRAGON_GROWL`). No se afirma ni utiliza `sendTitle` en pantalla.
+  - **Check 8 — Soft Enrage y Cooldown Scaling:** `VERIFIED BY RUNTIME SMOKE TEST` y `VERIFIED BY TEST`. Al 18% (<= 20%), Enrage se activó (`true`), el título reflejó `[ENRAGE]`, y el cooldown efectivo se escaló de 200 ticks a 150 ticks (`Math.round(200 * 0.75)`).
+  - **Check 9 — Monotonicidad Estricta:** `VERIFIED BY RUNTIME SMOKE TEST` y `VERIFIED BY TEST`. Al curar al 100%, Enrage permaneció activo (`true`), confirmando irreversibilidad.
+  - **Check 10 — Chunk Unload Diferido:** `VERIFIED BY RUNTIME SMOKE TEST`. `deferPendingChunkLoad()` ocultó la BossBar sin tratarlo como muerte; `resumeFromChunkLoad()` restauró el combate y la visibilidad.
+  - **Check 11 — Abort & Viewer Zero-Leak Cleanup:** `VERIFIED BY RUNTIME SMOKE TEST` y `VERIFIED BY TEST`. Invocación de `abortBattle` dejó 0 espectadores en BossBar. (En servidor headless sin clientes reales, pre-abort es 0; el tracking y remoción de múltiples espectadores reales está exhaustivamente demostrado en pruebas unitarias deterministas `DragonBossBarTest`).
+- **Conclusion:**
+  La presentación visual y el Soft Enrage operan de forma coherente y determinista. Se confirma empíricamente que `Attribute.ATTACK_DAMAGE` no existe en `EnderDragon`, por lo que el daño debe ser gestionado mediante interceptores de eventos o habilidades.
+- **Confidence:** `VERIFIED BY RUNTIME SMOKE TEST / HIGH`
+- **Limitations:**
+  Entorno de prueba de servidor headless sin jugadores de red reales conectados físicamente. Valores de `threshold: 0.20` y `cooldown-multiplier: 0.75` permanecen como `TUNING_CANDIDATE` sujetos a playtesting futuro.

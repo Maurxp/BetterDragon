@@ -1,7 +1,6 @@
 # Maven Build Artifacts
 target/
 *.class
-*.jar
 
 # IDE & Editor Metadata
 .idea/
@@ -32,3 +31,6 @@ replay_pid*
 *.bak
 *.swp
 *~
+
+# External Validation & Test Harnesses
+validation/

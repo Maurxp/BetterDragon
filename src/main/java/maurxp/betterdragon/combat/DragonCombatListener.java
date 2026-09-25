@@ -114,6 +114,7 @@ public class DragonCombatListener implements Listener {
                 maxHealth = dragon.getAttribute(Attribute.MAX_HEALTH).getValue();
             }
             double prospectiveHealth = Math.max(0.0, dragon.getHealth() - damage);
+            session.updateDragonHealth(prospectiveHealth, maxHealth);
             session.getPhaseRuntime().updateHealth(prospectiveHealth, maxHealth, currentTick, dragon);
         }
     }

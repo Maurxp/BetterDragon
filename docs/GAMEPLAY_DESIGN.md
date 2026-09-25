@@ -35,7 +35,8 @@ Toda la lógica de entidades, partículas, sonidos, atributos y proyectiles se c
 
 ### 3. Separación Conceptual: Combat Phase vs Flight Phase
 Se establece como axioma fundamental la distinción entre dos máquinas de estados independientes:
-- **BetterDragon Combat Phase (`PhaseDefinition`):** Representa el estado narrativo y de progresión del encuentro (ej. FASE_1 al 100%, FASE_2 al 75%, ENRAGE al 20%). Gobierna los pools de habilidades activas, multiplicadores de daño y presentación del encuentro.
+- **BetterDragon Combat Phase (`PhaseDefinition`):** Representa el estado narrativo y de progresión del encuentro (ej. FASE_1 al 100%, FASE_2 al 75%, FASE_3 al 50%, FASE_4 al 25%). Gobierna los pools de habilidades activas y la progresión secuencial del encuentro.
+  - *Distinción Transversal:* Soft Enrage **no** es una fase de combate; es un modificador transversal que coexiste con la fase activa (ej. FASE_4 + Enrage).
 - **Vanilla Flight Phase (`EnderDragon.Phase`):** Representa la locomoción e IA física interna de la entidad provista por Paper (`CIRCLING`, `STRAFING`, `LAND_ON_PORTAL`, `CHARGE_PLAYER`, etc.).
 - **Interacción:** La fase de combate de BetterDragon orquesta, solicita o reacciona ante las fases de vuelo de Paper mediante `EnderDragon#setPhase(Phase)` y `EnderDragonChangePhaseEvent`, pero **nunca se tratan como el mismo estado**.
 
@@ -64,7 +65,7 @@ Las siguientes capacidades ya existen y han sido validadas en el código de prod
 6. **Supresión NMS Aislada de BossBar Vanilla:**  
    Ocultamiento automático de la barra nativa para sustituirla por la BossBar estilizada administrada por el plugin.
 7. **Catálogo de Dragones y Atributos Nativos (`DragonCatalog`, `DragonAttributes`):**
-   Soporte completo para múltiples definiciones de dragones en `config.yml` (sección `dragons:`) congeladas en `BattleConfigurationSnapshot`. Control nativo Paper de `MAX_HEALTH`, `MOVEMENT_SPEED`, `FOLLOW_RANGE` y `ATTACK_DAMAGE`, con exclusión de `Attribute.SCALE` por bug MC-267372. (Implementado en Fase 3.13, consolidado en 3.13-R1).
+   Soporte completo para múltiples definiciones de dragones en `config.yml` (sección `dragons:`) congeladas en `BattleConfigurationSnapshot`. Control nativo Paper de `MAX_HEALTH`, `MOVEMENT_SPEED`, `FOLLOW_RANGE` (con `ATTACK_DAMAGE` no disponible/null en `EnderDragon` en Paper 26.1.2-74), con exclusión de `Attribute.SCALE` por bug MC-267372. (Implementado en Fase 3.13, consolidado en 3.13-R1).
 8. **Escalado Determinista de Salud al Inicio de Batalla (*Battle-Start Scaling* CAND-01):**
    Cálculo inmutable de `EffectiveDragonStats` en el snapshot de inicio de batalla según la cantidad de jugadores presentes en la arena geométrica. Fórmula lineal con capping y suelo unitario, inmune a reconexiones o muertes durante el combate. (Implementado en Fase 3.13, consolidado en 3.13-R1).
 
@@ -75,10 +76,10 @@ Las siguientes capacidades ya existen y han sido validadas en el código de prod
 Propuestas de diseño maduras derivadas de la investigación, planificadas para fases posteriores:
 
 ### 1. Control de Atributos Nativos — `[IMPLEMENTADO EN FASE 3.13]`
-- `Attribute.MAX_HEALTH`: Salud base personalizable mediante configuración.
-- `Attribute.MOVEMENT_SPEED`: Ajuste fino de aceleración de vuelo.
-- `Attribute.FOLLOW_RANGE`: Ampliación del rango de detección en arenas de gran tamaño.
-- `Attribute.ATTACK_DAMAGE`: Daño base de ataque cuerpo a cuerpo.
+- `Attribute.MAX_HEALTH`: Salud base personalizable mediante configuración (disponible/observado, 200.0 HP base).
+- `Attribute.MOVEMENT_SPEED`: Ajuste fino de velocidad de vuelo (disponible/observado; comportamiento físico locomotor no afirmado sin pruebas dedicadas).
+- `Attribute.FOLLOW_RANGE`: Ampliación del rango de detección en arenas de gran tamaño (disponible/observado; comportamiento IA no afirmado sin pruebas dedicadas).
+- `Attribute.ATTACK_DAMAGE`: **No disponible / null** nativamente en `EnderDragon` en Paper 26.1.2-74.
 - *Nota:* `Attribute.SCALE` rechazado formalmente por bug de motor MC-267372.
 
 ### 2. Escalado de Salud por Jugador al Inicio de Batalla (*Battle-Start Scaling*) — `[IMPLEMENTADO EN FASE 3.13]`
@@ -244,6 +245,7 @@ Toda mecánica candidata debe ser validada mediante los experimentos técnicos f
 - `EXP-006`: Legibilidad y tolerancias de latencia en telegrafiado visual.
 - `EXP-007`: Limpieza determinista de esbirros con PDC tras victoria o aborto.
 - `EXP-008`: Comparativa de modelos de escalado (Battle-Start vs Live Dynamic).
+- `EXP-009`: Validación Runtime de BossBar Propia, Atributos de EnderDragon y Soft Enrage (11/11 Checks PASS) (`[VERIFIED BY RUNTIME SMOKE TEST / HIGH]`).
 
 ---
 
@@ -251,7 +253,40 @@ Toda mecánica candidata debe ser validada mediante los experimentos técnicos f
 
 La Fase 3.13 y su consolidación 3.13-R1 implementaron:
 1. **Catálogo de Múltiples Dragones:** Carga de un catálogo inmutable `DragonCatalog` desde la sección `dragons:` de `config.yml`, permitiendo seleccionar variantes por comando (`/bd start [mundo] [arena] [perfil]`) y congelándolas en snapshots inmutables.
-2. **Control de Atributos Nativos del Dragón:** Aplicación formal de `Attribute.MAX_HEALTH`, `Attribute.MOVEMENT_SPEED`, `Attribute.FOLLOW_RANGE` y `Attribute.ATTACK_DAMAGE` durante el spawn en `DragonSpawner`.
+2. **Control de Atributos Nativos del Dragón:** Aplicación formal de `Attribute.MAX_HEALTH`, `Attribute.MOVEMENT_SPEED` y `Attribute.FOLLOW_RANGE` durante el spawn en `DragonSpawner` (`Attribute.ATTACK_DAMAGE` no disponible/null en Paper 26.1.2-74).
 3. **Escalado de Salud al Inicio de Batalla (*Battle-Start Scaling*):** Implementación de la fórmula de escalado determinista basada en los participantes presentes en la arena durante el cambio de estado `PREPARING -> ACTIVE`.
 4. **Vinculación Espacial Arena → Dragón:** Conexión estricta de las coordenadas de spawn y podio (`dragon.setPodium()`) derivadas directamente de `ArenaDefinition`.
 5. **Ampliación de Identidad PDC:** Escritura y validación formal de `betterdragon:definition_id` y `betterdragon:schema_version = 1` durante el spawn de la entidad.
+
+---
+
+## N. Alcance de la Fase 3.14 / 3.14-R1 (Encounter Presentation & Soft Enrage) — `[IMPLEMENTADO]`
+
+La Fase 3.14 y su consolidación 3.14-R1 implementaron la presentación inmersiva y el escalado de intensidad de combate sin sobrearquitectura:
+1. **BossBar Propia e Independiente:**
+   - Presentación autónoma en Paper API (`org.bukkit.boss.BossBar`) preservando la supresión de la BossBar vanilla original.
+   - Cálculo de progreso estrictamente acotado a `[0.0, 1.0]` inmune a `NaN`, `Infinity`, salud negativa y denominadores nulos.
+   - Formateo configurable con placeholders `{dragon_name}`, `{phase}` y `{enrage}` explícito:
+     - Si el título contiene `{enrage}`: activo -> `&c[ENRAGE]`, inactivo -> `""`.
+     - Si el título NO contiene `{enrage}`: **no se añade automáticamente** ninguna etiqueta.
+   - Sincronización en tiempo real de espectadores en arena con remoción determinista en desconexión, muerte y teletransporte.
+   - Eliminación de `catch (Throwable ignored)` sustituido por logging contextual tipado.
+2. **Feedback Sensorial de Transición de Fases:**
+   - Reutilización de `BetterDragonPhaseChangeEvent` con notificación y emisión de audio real (`Sound.ENTITY_ENDER_DRAGON_GROWL`, volumen 1.0, pitch 1.0) a espectadores.
+   - No se utiliza ni afirma `sendTitle()` en pantalla.
+3. **Mecánica de Soft Enrage Transversal:**
+   - Separación formal de las fases de combate: Enrage actúa como modificador transversal global aplicable en cualquier fase.
+   - Activación monotónica irreversible (`false -> true`) al cruzar el umbral (`healthRatio <= threshold`, candidato `0.20`).
+   - Aceleración efectiva de recarga de habilidades compatibles mediante `cooldownMultiplier` (candidato `0.75`; `< 1.0` acelera, `= 1.0` sin cambio, `> 1.0` retarda), preservando las definiciones inmutables de las habilidades.
+   - Emisión de audio de furia (`Sound.ENTITY_ENDER_DRAGON_GROWL`, volumen 1.2, pitch 0.8).
+4. **Aislamiento en Snapshot e Inmutabilidad:**
+   - Congelamiento de perfiles de BossBar y Enrage en `BattleConfigurationSnapshot`. Los reloads globales (`/bd reload`) no alteran las batallas en curso.
+5. **Validación Runtime Real (EXP-009 — 11/11 Checks PASS):**
+   - Comprobaciones empíricas ejecutadas en Paper 26.1.2-74 (Java 25) con apagado limpio.
+   - Matriz de evidencia rigurosa:
+     - `Attribute.MAX_HEALTH`: 200.0 (OBSERVED).
+     - `Attribute.MOVEMENT_SPEED`: 0.7 (OBSERVED; comportamiento locomotor no afirmado sin prueba física).
+     - `Attribute.FOLLOW_RANGE`: 17.77 (OBSERVED; comportamiento IA no afirmado sin prueba física).
+     - `Attribute.ATTACK_DAMAGE`: NOT SUPPORTED / NULL (`dragon.getAttribute(Attribute.ATTACK_DAMAGE) == null`).
+     - `dragon.setPodium`: VERIFIED BY RUNTIME SMOKE TEST (API invocation smoke test; postcondición interna no expuesta).
+     - Supresión vanilla: VERIFIED BY RUNTIME SMOKE TEST (controlador activo en mundo).

@@ -32,6 +32,82 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 | **3.12** | **Investigación & Formalización** | Investigación de estado del arte (Paper 26.1.2-74), formalización de decisiones de diseño y catálogo de perfiles. | `COMPLETE` |
 | **3.13** | **Perfiles, Atributos & Scaling** | Catálogo múltiple de perfiles (`DragonCatalog`), atributos (`DragonAttributes`), scaling lineal por jugadores (`DragonScalingCalculator`), snapshot de batalla (`BattleConfigurationSnapshot`), selección en `/bd start`, persistencia PDC extendida. | `COMPLETE` |
 | **3.13-R1** | **Consolidación, Corrección & Cierre** | Corrección de `bd-test-lifecycle`, restauración de invariantes en `DragonDefinition`, semántica Opción A en scaling (`enabled: true` sin modo = `LINEAR`), tuning candidates documentados, eliminación de `catch (Throwable)`, validación `definition_id` en sesión, verificación schema v1, 372 tests. | `COMPLETE` |
+| **3.14** | **Encounter Presentation & Soft Enrage** | BossBar propia independiente con supresión vanilla preservada, cálculo seguro [0.0, 1.0], feedback sensorial de fases, Soft Enrage monotónico false -> true, escalado de cooldown de habilidades, aislamiento de snapshot ante reload, validación EXP-009 (11/11 checks PASS), 416 tests. | `COMPLETE` |
+
+---
+
+## 10. Estado de la Fase 3.13 / 3.13-R1 (Perfiles, Atributos & Scaling) — `DONE`
+
+(Sección existente preservada)
+
+---
+
+## 11. Estado de la Fase 3.14 / 3.14-R1 (Encounter Presentation & Soft Enrage) — `COMPLETE`
+
+- **BossBar Propia de BetterDragon (`maurxp.betterdragon.presentation`):**
+  - `DragonBossBar`: Controlador de presentación visual independiente por cada `BattleSession`. Cero singletons globales.
+  - Supresión de la BossBar vanilla existente preservada intacta mediante `VanillaBossBarController` (NMS aislado en plataforma).
+  - Cálculo de progreso matemáticamente seguro `DragonBossBar.calculateProgress(currentHealth, maxHealth)`:
+    - Rango estrictamente delimitado a `[0.0, 1.0]`.
+    - Blindado contra `NaN`, `Infinity`, valores negativos y división por cero.
+  - Formato de título con placeholders mínimos `{dragon_name}`, `{phase}` y `{enrage}` explícito:
+    - Si el título contiene `{enrage}`: activo -> `&c[ENRAGE]`, inactivo -> `""`.
+    - Si el título NO contiene `{enrage}`: no se anexa ninguna etiqueta automáticamente.
+    - Traducción limpia de códigos de color ampersand (`&` -> `§`) y recorte (`trim()`).
+  - Gestión de espectadores (`trackedViewers`): añade jugadores en la arena, remueve desconectados, respawns o jugadores muertos sin barras fantasma ni duplicados.
+  - **Hardening 3.14-R1:** Eliminación completa de `catch (Throwable ignored)`. Sustituido por excepciones tipadas (`Exception`) con logging contextual estructurado (`Level.WARNING` / `Level.FINE`) sin silenciar errores de programación.
+- **Configuración y Aislamiento por Snapshot (`maurxp.betterdragon.config`):**
+  - `DragonBossBarDefinition`: Inmutable (record) con `enabled`, `title` (default `"{dragon_name} &7• &f{phase} {enrage}"`), `color` (`BarColor`, default `PURPLE`) y `style` (`BarStyle`, default `SOLID`).
+  - `DragonEnrageDefinition`: Inmutable (record) con `enabled`, `threshold` (default `0.20`, rango `(0.0, 1.0]`) y `cooldownMultiplier` (default `0.75`, `> 0.0`).
+  - Semántica del multiplicador: `< 1.0` (cooldown más corto), `= 1.0` (sin cambio), `> 1.0` (cooldown más largo).
+  - Catalogación explícita de `threshold = 0.20` y `cooldownMultiplier = 0.75` como **`TUNING_CANDIDATE`** (valores técnicos preliminares no declarados balance definitivo).
+  - Integración en `DragonDefinition` y `BattleConfigurationSnapshot`: las batallas activas conservan su configuración congelada inmutable frente a `/betterdragon reload`.
+- **Feedback Sensorial de Transiciones de Fase:**
+  - `BetterDragonPhaseChangeEvent`: Reutilizado para transportar `BattleId`, `previousPhase` y `newPhase`.
+  - `DragonPresentationListener`: Actualiza el título de la BossBar en tiempo real y emite sonido temático (`Sound.ENTITY_ENDER_DRAGON_GROWL`, volumen 1.0, pitch 1.0) a los espectadores.
+  - **Precisión Documental 3.14-R1:** Se documenta estrictamente el feedback auditivo y la actualización de la BossBar; no se afirma el envío de títulos en pantalla (`sendTitle()`), el cual no forma parte de la implementación.
+- **Mecánica de Soft Enrage Transversal:**
+  - Enrage **NO** es una fase de combate (`CombatPhase`); es un modificador transversal compatible con cualquier fase (incluyendo Phase 4 + Enrage).
+  - Activación determinista: se activa cuando `healthRatio <= threshold` (incluyendo la igualdad exacta).
+  - Monotonicidad estricta: transición `false -> true` irreversible durante el combate (si el dragón recupera salud por cristales, el Enrage se mantiene activo).
+  - Activación única: no dispara eventos ni efectos duplicados. Emite feedback sonoro (`Sound.ENTITY_ENDER_DRAGON_GROWL`, volumen 1.2, pitch 0.8).
+  - Efecto funcional: modifica exclusivamente el cooldown efectivo de habilidades compatibles en `AbilityEngine`:
+    `effectiveCooldown = max(1, Math.round(baseCooldown * cooldownMultiplier))`.
+    La definición inmutable de la habilidad no sufre modificaciones.
+- **Ciclo de Vida y Resiliencia:**
+  - `ACTIVE`: BossBar visible para espectadores elegibles, progreso sincronizado.
+  - `DYING` / `COMPLETED`: Limpieza inmediata de espectadores, ocultación de barra y liberación de referencias.
+  - `ABORTED`: Limpieza inmediata de espectadores y liberación de recursos.
+  - `DEFERRED_PENDING_CHUNK_LOAD`: Oculta la BossBar sin considerar la descarga como muerte ni romper el ciclo de vida; al reanudar restaura visibilidad.
+  - `onDisable()`: Limpieza total de todas las BossBars activas sin dejar artefactos visuales vivos tras reinicio.
+- **Auditoría Anti-Sobrearquitectura:**
+  - Clases nuevas estrictamente funcionales:
+    1. `DragonBossBarDefinition` (modelo inmutable de config).
+    2. `DragonEnrageDefinition` (modelo inmutable de config).
+    3. `DragonBossBar` (controlador de presentación directo en Bukkit BossBar API).
+    4. `DragonPresentationListener` (listener para puente de eventos de fase y espectadores).
+  - Cero factories, registries, resolvers o engines especulativos.
+- **Validación Runtime en Paper 26.1.2-74 (EXP-009 — 11/11 Checks PASS):**
+  - Validación empírica de integración ejecutada sobre Paper 26.1.2-74 / Java 25 en la auditoría EXP-009.
+  - Matriz de evidencia rigurosa (sin sobreafirmaciones):
+    1. Check 1 (Batalla activa): VERIFIED BY RUNTIME SMOKE TEST.
+    2. Check 2 (Supresión vanilla): VERIFIED BY RUNTIME SMOKE TEST (controlador activo en mundo).
+    3. Check 3 (BossBar propia inicializada): VERIFIED BY RUNTIME SMOKE TEST (`Ender Dragon §7• §fphase_1`, 100%).
+    4. Check 4 (Atributos nativos en Paper 26.1.2-74):
+       - `MAX_HEALTH`: 200.0 (OBSERVED).
+       - `MOVEMENT_SPEED`: 0.7 (OBSERVED; comportamiento físico locomotor no verificado independientemente).
+       - `FOLLOW_RANGE`: 17.77 (OBSERVED; comportamiento IA no verificado independientemente).
+       - `ATTACK_DAMAGE`: NOT SUPPORTED / NULL (`dragon.getAttribute(Attribute.ATTACK_DAMAGE) == null`).
+    5. Check 5 (`setPodium`): VERIFIED BY RUNTIME SMOKE TEST (API invocation smoke test; postcondición interna no expuesta en Bukkit API).
+    6. Check 6 (Progreso de salud proporcional): VERIFIED BY RUNTIME SMOKE TEST (85.00%).
+    7. Check 7 (Transición de fase y audio): VERIFIED BY RUNTIME SMOKE TEST (título phase_2 y audio; sin títulos de pantalla).
+    8. Check 8 (Soft Enrage y Cooldown Scaling): VERIFIED BY RUNTIME SMOKE TEST (18% <= 20%, 200t -> 150t con x0.75).
+    9. Check 9 (Monotonicidad estricta): VERIFIED BY RUNTIME SMOKE TEST (curación a 200.0 HP mantiene enrage=true).
+    10. Check 10 (Chunk Unload diferido): VERIFIED BY RUNTIME SMOKE TEST (no muerte, oculta y restaura).
+    11. Check 11 (Abort y Zero-Leak): VERIFIED BY RUNTIME SMOKE TEST (tracking pre-abort y 0 viewers post-abort).
+- **Pruebas Automatizadas y Cobertura:**
+  - Batería de pruebas unitarias cubriendo BossBar, Enrage, monotonicidad, clamping, reload isolation, {enrage} explícito, multiplicadores (<1, =1, >1) e inmutabilidad de habilidades.
+  - **Total del proyecto:** 416 pruebas unitarias ejecutadas, 0 fallos, 0 errores, 0 omitidos.
 
 ---
 

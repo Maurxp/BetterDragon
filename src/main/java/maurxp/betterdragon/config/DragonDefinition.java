@@ -31,6 +31,8 @@ import java.util.stream.Collectors;
  * @param displayName nombre visible opcional para visualización en mensajes o GUI
  * @param attributes  atributos base del dragón (salud máxima, velocidad, rango)
  * @param scaling     política de escalado según jugadores presentes
+ * @param bossbar     configuración visual de la BossBar propia de BetterDragon
+ * @param enrage      configuración del modificador transversal de Soft Enrage
  * @param phases      lista inmutable de fases de combate ordenadas
  * @param abilities   catálogo inmutable de habilidades disponibles
  * @author maurxp
@@ -40,6 +42,8 @@ public record DragonDefinition(
         String displayName,
         DragonAttributes attributes,
         DragonScalingDefinition scaling,
+        DragonBossBarDefinition bossbar,
+        DragonEnrageDefinition enrage,
         List<PhaseDefinition> phases,
         Map<String, AbilityDefinition> abilities
 ) {
@@ -59,6 +63,8 @@ public record DragonDefinition(
         displayName = (displayName != null && !displayName.isBlank()) ? displayName.trim() : null;
         attributes = attributes != null ? attributes : DragonAttributes.defaults();
         scaling = scaling != null ? scaling : DragonScalingDefinition.defaults();
+        bossbar = bossbar != null ? bossbar : DragonBossBarDefinition.defaults();
+        enrage = enrage != null ? enrage : DragonEnrageDefinition.defaults();
 
         Objects.requireNonNull(phases, "La lista de fases no puede ser nula");
         if (phases.isEmpty()) {
@@ -101,6 +107,20 @@ public record DragonDefinition(
     }
 
     /**
+     * Constructor de conveniencia retrocompatible para definiciones de la Fase 3.13 sin BossBar ni Enrage explícitos.
+     */
+    public DragonDefinition(
+            String id,
+            String displayName,
+            DragonAttributes attributes,
+            DragonScalingDefinition scaling,
+            List<PhaseDefinition> phases,
+            Map<String, AbilityDefinition> abilities
+    ) {
+        this(id, displayName, attributes, scaling, DragonBossBarDefinition.defaults(), DragonEnrageDefinition.defaults(), phases, abilities);
+    }
+
+    /**
      * Constructor de conveniencia retrocompatible para definiciones previas a la Fase 3.13.
      */
     public DragonDefinition(String id, List<PhaseDefinition> phases, Map<String, AbilityDefinition> abilities) {
@@ -122,6 +142,8 @@ public record DragonDefinition(
                 "Ender Dragon",
                 DragonAttributes.defaults(),
                 DragonScalingDefinition.defaults(),
+                DragonBossBarDefinition.defaults(),
+                DragonEnrageDefinition.defaults(),
                 defaultPhases,
                 Map.of()
         );

@@ -36,6 +36,7 @@ import maurxp.betterdragon.config.RewardConfigurationSnapshot;
 import maurxp.betterdragon.config.RewardItemDefinition;
 import maurxp.betterdragon.config.SlayerRewardDefinition;
 import maurxp.betterdragon.phase.PhaseRuntime;
+import maurxp.betterdragon.presentation.DragonPresentationListener;
 import maurxp.betterdragon.platform.bossbar.BossBarWorldListener;
 import maurxp.betterdragon.platform.bossbar.VanillaBossBarController;
 import maurxp.betterdragon.platform.bossbar.VanillaBossBarControllerFactory;
@@ -221,6 +222,10 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
             DragonLeaderboardListener leaderboardListener = new DragonLeaderboardListener(leaderboardService, getLogger());
             getServer().getPluginManager().registerEvents(leaderboardListener, this);
 
+            // 9b. Inicializar presentación y BossBar propia (Fase 3.14)
+            DragonPresentationListener presentationListener = new DragonPresentationListener(sessionManager, getLogger());
+            getServer().getPluginManager().registerEvents(presentationListener, this);
+
             getServer().getPluginManager().registerEvents(this, this);
 
             // 10. Inicializar Application Layer y Command Framework (Fase 3.11)
@@ -286,11 +291,25 @@ public final class BetterDragonPlugin extends JavaPlugin implements Listener {
                     + " sesiones y dragones activos para recuperación futura.");
         }
 
+        // Limpieza de presentación y BossBars activas (Fase 3.14)
+        if (sessionManager != null) {
+            for (BattleSession session : sessionManager.getAllSessions().values()) {
+                if (session != null && session.getBossBar() != null) {
+                    try {
+                        session.getBossBar().cleanup();
+                    } catch (Exception e) {
+                        getLogger().log(Level.FINE, "[BetterDragon] Excepción al limpiar BossBar en onDisable: " + e.getMessage(), e);
+                    }
+                }
+            }
+        }
+
         // Desregistrar comando si fue registrado
         if (betterDragonCommand != null) {
             try {
                 betterDragonCommand.unregister(getServer().getCommandMap());
-            } catch (Throwable ignored) {
+            } catch (Exception e) {
+                getLogger().log(Level.FINE, "[BetterDragon] Excepción al desregistrar comando en onDisable: " + e.getMessage(), e);
             }
         }
 

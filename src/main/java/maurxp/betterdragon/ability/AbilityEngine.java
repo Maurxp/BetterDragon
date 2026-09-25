@@ -227,8 +227,16 @@ public class AbilityEngine {
             return false;
         }
 
-        // 7. Actualizar cooldown tras ejecución exitosa
-        cooldownTracker.setCooldown(abilityId, currentTick, ability.cooldownTicks());
+        // 7. Actualizar cooldown tras ejecución exitosa (Fase 3.14: Soft Enrage Cooldown Multiplier)
+        long baseCooldown = ability.cooldownTicks();
+        double multiplier = (session != null && session.getConfigSnapshot() != null
+                && session.getConfigSnapshot().dragonDefinition() != null
+                && session.getConfigSnapshot().dragonDefinition().enrage() != null)
+                ? session.getConfigSnapshot().dragonDefinition().enrage().cooldownMultiplier()
+                : 1.0;
+        boolean enrageActive = session != null && session.isEnrageActive();
+        long effectiveCooldown = calculateEffectiveCooldown(baseCooldown, enrageActive, multiplier);
+        cooldownTracker.setCooldown(abilityId, currentTick, effectiveCooldown);
         return true;
     }
 
@@ -289,5 +297,32 @@ public class AbilityEngine {
 
     public LocationResolver getLocationResolver() {
         return locationResolver;
+    }
+
+    /**
+     * Calcula de forma matemáticamente segura el cooldown efectivo aplicando el multiplicador
+     * transversal de Soft Enrage.
+     * <p>
+     * Principios:
+     * <ul>
+     *   <li>Si Enrage no está activo o multiplier es inválido/no positivo, preserva el cooldown base.</li>
+     *   <li>Si baseCooldown > 0, garantiza que el cooldown efectivo sea al menos de 1 tick.</li>
+     *   <li>Si baseCooldown <= 0, retorna 0 (sin cooldown).</li>
+     *   <li>No modifica la definición inmutable de la habilidad.</li>
+     * </ul>
+     *
+     * @param baseCooldown       cooldown base configurado en la habilidad
+     * @param enrageActive       true si la batalla se encuentra en estado Enrage
+     * @param cooldownMultiplier multiplicador de tiempo de recarga
+     * @return cooldown efectivo en ticks
+     */
+    public static long calculateEffectiveCooldown(long baseCooldown, boolean enrageActive, double cooldownMultiplier) {
+        if (baseCooldown <= 0) {
+            return 0;
+        }
+        if (!enrageActive || !Double.isFinite(cooldownMultiplier) || cooldownMultiplier <= 0.0) {
+            return baseCooldown;
+        }
+        return Math.max(1L, Math.round(baseCooldown * cooldownMultiplier));
     }
 }
