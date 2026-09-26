@@ -10,7 +10,7 @@ import org.bukkit.World;
  * <b>únicamente</b> de esta interfaz, garantizando un 0% de acoplamiento a NMS
  * o reflection sobre internals de Minecraft.
  * <p>
- * Nota arquitectónica (Fase 2.5.7-R1 / Fase 3.0):
+ * Nota arquitectónica:
  * El método {@code restoreVanillaBossBar(World)} fue eliminado permanentemente.
  * BetterDragon mantiene la soberanía exclusiva del ciclo de vida y no restaura
  * el combate vanilla en producción.

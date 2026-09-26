@@ -110,7 +110,7 @@ public class DragonLifecycleListener implements Listener {
      * Notifica que un conjunto de entidades ha sido cargado con un chunk, permitiendo
      * intentar resolver la identidad de cualquier dragón diferido.
      * <p>
-     * <b>Principio (3.3-R1):</b> La carga de entidades NO reactiva automáticamente la batalla;
+     * <b>Principio:</b> La carga de entidades NO reactiva automáticamente la batalla;
      * delega en {@link #resolveDeferredDragon(Entity)} para buscar y validar la entidad esperada.
      */
     @EventHandler(priority = EventPriority.MONITOR)

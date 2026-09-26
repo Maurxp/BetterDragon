@@ -861,3 +861,76 @@ Todo dragón generado por BetterDragon porta síncronamente 4 claves en su `Pers
   - `Attribute.FOLLOW_RANGE`: Disponible/observado (`17.77` base; comportamiento IA no afirmado sin pruebas físicas independientes: `NOT INDEPENDENTLY VERIFIED`).
   - `Attribute.ATTACK_DAMAGE`: **No disponible / null** nativamente en la entidad `EnderDragon` en Paper 26.1.2-74 (`dragon.getAttribute(Attribute.ATTACK_DAMAGE) == null`).
   - `dragon.setPodium(Location)`: API invocation smoke test ejecutado con éxito (postcondición interna no expuesta en Bukkit API: `VERIFIED BY RUNTIME SMOKE TEST`).
+
+---
+
+## 16. Advanced Combat Abilities & Sensory Telegraphs (Fase 3.15)
+
+### 16.1 Telegrafiado Sensorial Declarativo e Inmutable:
+- **Modelo de Dominio (`TelegraphDefinition`):**
+  - Objeto inmutable (record) desacoplado del efecto físico de combate.
+  - Atributos esenciales: `durationTicks` (duración previa), `particle` (`Particle`), `particleCount`, `particleRadius`, `sound` (`String` con resolución a `Sound` vía `OldEnum.valueOf` con fallback seguro), `soundVolume`, `soundPitch`.
+  - Ventanas de aviso estandarizadas como `TUNING_CANDIDATE`:
+    - `TICKS_MINOR = 16L` (impactos leves, ~0.8s)
+    - `TICKS_MODERATE = 30L` (impactos moderados, 1.5s)
+    - `TICKS_MAJOR = 40L` (impactos mayores / bombardeo, 2.0s)
+    - `TICKS_LETHAL = 60L` (impactos letales, 3.0s)
+- **Separación Temporal Telegrafiado vs. Efecto Físico:**
+  - El telegrafiado sensorial se dispara en el tick 0 de invocación de la habilidad, emitiendo partículas y sonido en el hilo principal de Bukkit/Paper.
+  - El efecto físico real (daño, knockback, proyectiles) **NO** ocurre inmediatamente; se programa mediante `DelayedTaskScheduler` para ejecutarse exactamente tras los `durationTicks` especificados.
+  - Hilo principal garantizado: **0% operaciones asíncronas** manipulando mundos, entidades o jugadores.
+
+### 16.2 Triggers No Proliferantes (Anti-Sobrearquitectura):
+- En lugar de crear enums específicos por cada fase (`CIRCLING`, `LAND_ON_PORTAL`, `TAKEOFF`, etc.), se formalizan triggers genéricos:
+  1. `ON_FLIGHT_PHASE`: Se dispara ante transiciones de fase de vuelo vanilla (`EnderDragonChangePhaseEvent` vía `DragonFlightListener`), filtrando la fase requerida mediante propiedades de la habilidad.
+  2. `ON_DAMAGE`: Se dispara ante daño físico recibido por el dragón (`DragonCombatListener`), permitiendo contrataques condicionales según el tipo de daño (`damage-types`).
+
+### 16.3 Efectos Declarativos Implementados:
+- **Bombardeo Aéreo (`CarpetBombEffect` / `CARPET_BOMB` / CAND-03):**
+  - Genera racimos de entidades `TNTPrimed` alrededor del dragón con fuse ticks configurable (default 80 ticks = 4s).
+  - Firma cada entidad TNT con PDC (`betterdragon:managed`, `betterdragon:battle_id`, `betterdragon:explosive`).
+- **Onda Expansiva de Aterrizaje (`ShockwaveEffect` / `SHOCKWAVE` / CAND-04):**
+  - Se ejecuta en transiciones de aterrizaje (`LAND_ON_PORTAL` o perching).
+  - Calcula vectores radiales tridimensionales de empuje $(\vec{v} = \text{normalize}(\Delta x, \Delta z) \times k_{h} + k_{v}\hat{j})$ y daño configurable hacia jugadores dentro del perímetro de la arena. Presentación auditiva y visual de sonic boom.
+- **Invocación de Esbirros (`SummonEffect` / `SUMMON` / CAND-06):**
+  - Spawnea entidades de apoyo con firma completa de 4 claves PDC (`managed`, `battle_id`, `minion`, `minion_type`).
+  - Tipo de criatura configurable con fallback dinámico (default `ENDERMITE`, clasificado como `TUNING_CANDIDATE`).
+
+### 16.4 Contrataques Reactivos con Cooldown por Atacante (`ON_DAMAGE` / CAND-05):
+- `AbilityCooldownTracker.setAttackerCooldown(abilityId, attackerUuid, tick, cooldownTicks)`:
+  - Mantiene tracking de cooldowns individualizado por cada atacante.
+  - Si el atacante A golpea al dragón, entra en cooldown (default 100 ticks = 5s, `TUNING_CANDIDATE`); si el atacante B golpea inmediatamente después, el contrataque es elegible de forma independiente sin ser bloqueado por el estado de A.
+
+### 16.5 Protección de Terreno Determinista (`DragonExplosionListener`):
+- Intercepta `EntityExplodeEvent` con prioridad NORMAL.
+- Comprueba si la entidad portadora de la explosión tiene el PDC `betterdragon:explosive = true` y `betterdragon:managed = true`.
+- Si es BetterDragon:
+  - Invoca `event.blockList().clear()`, neutralizando al 100% la destrucción de bloques de la isla del End.
+  - Conserva íntegro el daño a jugadores y knockback físico.
+- Si es una explosión externa/vanilla:
+  - No realiza ninguna acción; el evento y su `blockList()` se preservan idénticos.
+  - Cero flags booleanas globales en el servidor.
+
+### 16.6 Identificación y Limpieza Determinista de Esbirros (PDC):
+- Esquema de 4 claves PDC en minions:
+  - `betterdragon:managed = true` (BOOLEAN)
+  - `betterdragon:battle_id = <uuid>` (STRING)
+  - `betterdragon:minion = true` (BOOLEAN)
+  - `betterdragon:minion_type = <id>` (STRING)
+- Limpieza determinista (`BattleSession.cleanSessionMinions()`):
+  - Invocada en estados terminales (`abort()` y `complete()`).
+  - Escanea y remueve exclusivamente las entidades cuyo PDC coincida con el `battleId` de la sesión.
+  - Cero eliminación de mobs naturales o minions pertenecientes a otras batallas.
+
+### 16.7 Ciclo de Vida y Resiliencia:
+- `BattleSession.registerPendingTask(CancellableTask)`:
+  - Toda tarea diferida (telegraph o delay de efecto) queda registrada en la sesión.
+  - Al abortar o terminar la sesión, `cancelPendingTasks()` cancela inmediatamente todas las tareas pendientes, impidiendo la aparición de efectos o explosiones huérfanas tras el fin de la batalla.
+- Preservación íntegra de `DEFERRED_PENDING_CHUNK_LOAD`: la descarga de chunk no interrumpe la sesión ni altera los estados de enrage o habilidades.
+
+### 16.8 Aislamiento de Snapshot (Snapshot Isolation):
+- Todas las habilidades, telegrafiado, cooldowns y parámetros provienen de `BattleConfigurationSnapshot`.
+- La ejecución de `/betterdragon reload` congela el combate activo; las modificaciones en YAML solo afectan batallas futuras.
+
+### 16.9 Cero NMS:
+- Todo el subsistema de combate, listeners, telegrafiado y explosiones opera con **0% NMS** sobre la API de Paper 26.1.2-74 y Java 25.

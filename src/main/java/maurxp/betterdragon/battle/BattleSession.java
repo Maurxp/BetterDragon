@@ -17,13 +17,26 @@ import maurxp.betterdragon.combat.CombatSnapshot;
 import maurxp.betterdragon.config.BattleConfigurationSnapshot;
 import maurxp.betterdragon.phase.PhaseRuntime;
 import maurxp.betterdragon.presentation.DragonBossBar;
+import maurxp.betterdragon.util.BetterDragonKeys;
+import maurxp.betterdragon.util.CancellableTask;
+import maurxp.betterdragon.util.DelayedTaskScheduler;
+import org.bukkit.Bukkit;
+import org.bukkit.World;
 import org.bukkit.entity.EnderDragon;
+import org.bukkit.entity.Entity;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
 
 import java.time.Instant;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Random;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Representa el estado mutable en tiempo de ejecución de una batalla de
@@ -66,6 +79,11 @@ public class BattleSession {
     private final PhaseRuntime phaseRuntime;
     private final AbilityEngine abilityEngine;
     private final DragonBossBar bossBar;
+    private final DelayedTaskScheduler delayedTaskScheduler;
+
+    private final Set<UUID> minionUuids = ConcurrentHashMap.newKeySet();
+    private final Set<Entity> trackedMinions = ConcurrentHashMap.newKeySet();
+    private final List<CancellableTask> pendingTasks = new CopyOnWriteArrayList<>();
 
     private BattleState state;
     private DragonIdentity dragonIdentity;
@@ -76,7 +94,7 @@ public class BattleSession {
     private boolean enrageActive = false;
 
     public BattleSession(BattleId battleId, String worldName, UUID worldUniqueId,
-            BattleConfigurationSnapshot configSnapshot) {
+            BattleConfigurationSnapshot configSnapshot, DelayedTaskScheduler delayedTaskScheduler) {
         this.battleId = Objects.requireNonNull(battleId, "El battleId no puede ser nulo");
         this.worldName = Objects.requireNonNull(worldName, "El worldName no puede ser nulo");
         this.worldUniqueId = Objects.requireNonNull(worldUniqueId, "El worldUniqueId no puede ser nulo");
@@ -85,6 +103,24 @@ public class BattleSession {
         this.state = BattleState.IDLE;
         this.combatRuntime = new CombatRuntime(this);
         this.spatialContext = new ArenaBattleSpatialContext(configSnapshot.arenaDefinition());
+        this.delayedTaskScheduler = delayedTaskScheduler != null ? delayedTaskScheduler : (runnable, delay) -> {
+            if (delay <= 0) {
+                runnable.run();
+                return () -> {};
+            }
+            try {
+                org.bukkit.scheduler.BukkitTask bt = Bukkit.getScheduler().runTaskLater(
+                        org.bukkit.plugin.java.JavaPlugin.getProvidingPlugin(BattleSession.class),
+                        runnable,
+                        delay
+                );
+                return bt::cancel;
+            } catch (Exception | LinkageError e) {
+                runnable.run();
+                return () -> {};
+            }
+        };
+
         AbilityCooldownTracker cooldownTracker = new AbilityCooldownTracker();
         TargetSelector targetSelector = new TargetSelector(this.spatialContext, new Random());
         LocationResolver locationResolver = new LocationResolver(this.spatialContext);
@@ -94,6 +130,7 @@ public class BattleSession {
                 targetSelector,
                 locationResolver,
                 null,
+                this.delayedTaskScheduler,
                 null
         );
         this.phaseRuntime = new PhaseRuntime(this, configSnapshot.dragonDefinition().phases(), this.abilityEngine, null);
@@ -104,8 +141,13 @@ public class BattleSession {
         );
     }
 
+    public BattleSession(BattleId battleId, String worldName, UUID worldUniqueId,
+            BattleConfigurationSnapshot configSnapshot) {
+        this(battleId, worldName, worldUniqueId, configSnapshot, null);
+    }
+
     public BattleSession(BattleId battleId, String worldName, UUID worldUniqueId) {
-        this(battleId, worldName, worldUniqueId, BattleConfigurationSnapshot.defaults());
+        this(battleId, worldName, worldUniqueId, BattleConfigurationSnapshot.defaults(), null);
     }
 
 
@@ -122,6 +164,11 @@ public class BattleSession {
     public static BattleSession create(BattleId battleId, String worldName, UUID worldUniqueId,
             BattleConfigurationSnapshot configSnapshot) {
         return new BattleSession(battleId, worldName, worldUniqueId, configSnapshot);
+    }
+
+    public static BattleSession create(BattleId battleId, String worldName, UUID worldUniqueId,
+            BattleConfigurationSnapshot configSnapshot, DelayedTaskScheduler delayedTaskScheduler) {
+        return new BattleSession(battleId, worldName, worldUniqueId, configSnapshot, delayedTaskScheduler);
     }
 
     /**
@@ -173,6 +220,8 @@ public class BattleSession {
      */
     public void beginDying() {
         this.bossBar.cleanup();
+        cancelPendingTasks();
+        cleanSessionMinions();
         transitionTo(BattleState.DYING);
     }
 
@@ -190,6 +239,8 @@ public class BattleSession {
             return this.result;
         }
         this.bossBar.cleanup();
+        cancelPendingTasks();
+        cleanSessionMinions();
         transitionTo(BattleState.COMPLETED);
         this.completedAt = Instant.now();
 
@@ -228,6 +279,15 @@ public class BattleSession {
     }
 
     /**
+     * Aborta la sesión usando la razón por defecto de comando administrativo.
+     *
+     * @return resultado inmutable de la batalla abortada
+     */
+    public BattleResult abort() {
+        return abort(BattleAbortReason.MANUAL_ABORT);
+    }
+
+    /**
      * Cancela o aborta la batalla por una condición no recuperable o intervención
      * administrativa.
      * Transición: cualquier estado operativo -> ABORTED.
@@ -240,6 +300,8 @@ public class BattleSession {
             return this.result;
         }
         this.bossBar.cleanup();
+        cancelPendingTasks();
+        cleanSessionMinions();
         transitionTo(BattleState.ABORTED);
         this.completedAt = Instant.now();
 
@@ -263,7 +325,114 @@ public class BattleSession {
         }
         this.stateBeforeChunkDeferral = this.state;
         this.bossBar.setVisible(false);
+        cancelPendingTasks();
         transitionTo(BattleState.DEFERRED_PENDING_CHUNK_LOAD);
+    }
+
+    /**
+     * Registra un esbirro invocado durante la batalla para su posterior limpieza determinista.
+     */
+    public void registerMinion(Entity minion) {
+        if (minion != null) {
+            this.minionUuids.add(minion.getUniqueId());
+            this.trackedMinions.add(minion);
+        }
+    }
+
+    /**
+     * Retorna una vista inmutable de los UUIDs de esbirros activos registrados.
+     */
+    public Set<UUID> getMinionUuids() {
+        return Collections.unmodifiableSet(minionUuids);
+    }
+
+    /**
+     * Registra una tarea diferida cancelable (ej. telegrafiado sensorial en curso).
+     */
+    public void registerPendingTask(CancellableTask task) {
+        if (task != null) {
+            this.pendingTasks.add(task);
+        }
+    }
+
+    /**
+     * Cancela todas las tareas diferidas pendientes de ejecución vinculadas a esta sesión.
+     */
+    public void cancelPendingTasks() {
+        for (CancellableTask task : pendingTasks) {
+            try {
+                task.cancel();
+            } catch (Exception ignored) {
+            }
+        }
+        pendingTasks.clear();
+    }
+
+    /**
+     * Ejecuta una rutina de barrido selectivo (EXP-007) eliminando el 100% de los esbirros
+     * creados por esta batalla identificados mediante PDC, sin alterar mobs pacíficos ni entidades externas.
+     */
+    public void cleanSessionMinions() {
+        try {
+            World world = Bukkit.getWorld(this.worldName);
+            cleanSessionMinions(world);
+        } catch (Exception ignored) {
+            cleanSessionMinions((World) null);
+        }
+    }
+
+    /**
+     * Ejecuta la rutina de limpieza selectiva de esbirros sobre un mundo explícito.
+     *
+     * @param world mundo en el que realizar el barrido
+     */
+    public void cleanSessionMinions(World world) {
+        try {
+            // 1. Limpieza de referencias directas en memoria
+            for (Entity entity : trackedMinions) {
+                try {
+                    if (entity != null && entity.isValid()) {
+                        entity.remove();
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+            trackedMinions.clear();
+
+            // 2. Limpieza de minions registrados por UUID
+            for (UUID uuid : minionUuids) {
+                try {
+                    if (Bukkit.getServer() != null) {
+                        Entity entity = Bukkit.getEntity(uuid);
+                        if (entity != null && entity.isValid()) {
+                            entity.remove();
+                        }
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+
+            // 2. Barrido complementario sobre entidades vivas con PDC de esta batalla
+            if (world != null && world.getEntities() != null) {
+                String battleIdStr = this.battleId.asString();
+                for (Entity entity : world.getEntities()) {
+                    if (entity != null && entity.isValid()) {
+                        PersistentDataContainer pdc = entity.getPersistentDataContainer();
+                        boolean isMinion = pdc.has(BetterDragonKeys.MINION, PersistentDataType.BOOLEAN)
+                                || pdc.has(BetterDragonKeys.MINION, PersistentDataType.BYTE);
+                        if (isMinion && battleIdStr.equals(pdc.get(BetterDragonKeys.BATTLE_ID, PersistentDataType.STRING))) {
+                            entity.remove();
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        minionUuids.clear();
+    }
+
+    public DelayedTaskScheduler getDelayedTaskScheduler() {
+        return delayedTaskScheduler;
     }
 
     /**

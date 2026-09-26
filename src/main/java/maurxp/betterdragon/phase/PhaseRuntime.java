@@ -20,7 +20,7 @@ import java.util.logging.Logger;
  * <ul>
  * <li><b>Aislamiento por Sesión:</b> Una instancia dedicada por cada {@link BattleSession}; dos batallas
  * simultáneas son completamente independientes.</li>
- * <li><b>Progresión Monotónica Estricta:</b> La batalla solo avanza hacia adelante (Fase 1 -> Fase 2 -> Fase 3).
+ * <li><b>Progresión Monotónica Estricta:</b> La batalla solo avanza hacia adelante (fase 1 -> fase 2 -> fase 3).
  * Si el dragón es curado por cristales del End, la fase <b>jamás</b> retrocede.</li>
  * <li><b>Determinismo ante Saltos Masivos:</b> Si un impacto de daño reduce la vida cruzando múltiples umbrales,
  * avanza de forma determinista hasta la fase correspondiente.</li>

@@ -30,6 +30,7 @@ import java.util.Optional;
  * @param executionTick    tick lógico del servidor en que se ejecuta
  * @param ability          definición de la habilidad en ejecución
  * @param phase            definición de la fase de combate activa
+ * @param entityConsumer   consumidor opcional para registrar entidades creadas (ej. minions)
  * @author maurxp
  */
 public record AbilityExecutionContext(
@@ -42,7 +43,8 @@ public record AbilityExecutionContext(
         Location resolvedOrigin,
         long executionTick,
         AbilityDefinition ability,
-        PhaseDefinition phase) {
+        PhaseDefinition phase,
+        java.util.function.Consumer<org.bukkit.entity.Entity> entityConsumer) {
 
     public AbilityExecutionContext {
         Objects.requireNonNull(battleId, "battleId no puede ser nulo");
@@ -55,5 +57,32 @@ public record AbilityExecutionContext(
         Objects.requireNonNull(ability, "ability no puede ser nula");
         Objects.requireNonNull(phase, "phase no puede ser nula");
         resolvedTargets = List.copyOf(resolvedTargets);
+    }
+
+    /**
+     * Constructor de compatibilidad hacia atrás sin entityConsumer.
+     */
+    public AbilityExecutionContext(
+            BattleId battleId,
+            String worldName,
+            EnderDragon dragon,
+            AbilityTrigger trigger,
+            Optional<Player> triggeringPlayer,
+            List<Player> resolvedTargets,
+            Location resolvedOrigin,
+            long executionTick,
+            AbilityDefinition ability,
+            PhaseDefinition phase) {
+        this(battleId, worldName, dragon, trigger, triggeringPlayer, resolvedTargets, resolvedOrigin,
+                executionTick, ability, phase, null);
+    }
+
+    /**
+     * Notifica el spawn de una entidad secundaria vinculada a la sesión (ej. minion).
+     */
+    public void registerSpawnedEntity(org.bukkit.entity.Entity entity) {
+        if (entityConsumer != null && entity != null) {
+            entityConsumer.accept(entity);
+        }
     }
 }

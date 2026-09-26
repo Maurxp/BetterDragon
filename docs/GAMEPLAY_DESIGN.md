@@ -246,6 +246,7 @@ Toda mecánica candidata debe ser validada mediante los experimentos técnicos f
 - `EXP-007`: Limpieza determinista de esbirros con PDC tras victoria o aborto.
 - `EXP-008`: Comparativa de modelos de escalado (Battle-Start vs Live Dynamic).
 - `EXP-009`: Validación Runtime de BossBar Propia, Atributos de EnderDragon y Soft Enrage (11/11 Checks PASS) (`[VERIFIED BY RUNTIME SMOKE TEST / HIGH]`).
+- `EXP-010`: Validación Runtime de Habilidades Avanzadas, Telegrafiado Sensorial, Protección de Terreno y Minions (10/10 Checks PASS) (`[VERIFIED BY RUNTIME SMOKE TEST / HIGH]`).
 
 ---
 
@@ -290,3 +291,47 @@ La Fase 3.14 y su consolidación 3.14-R1 implementaron la presentación inmersiv
      - `Attribute.ATTACK_DAMAGE`: NOT SUPPORTED / NULL (`dragon.getAttribute(Attribute.ATTACK_DAMAGE) == null`).
      - `dragon.setPodium`: VERIFIED BY RUNTIME SMOKE TEST (API invocation smoke test; postcondición interna no expuesta).
      - Supresión vanilla: VERIFIED BY RUNTIME SMOKE TEST (controlador activo en mundo).
+
+---
+
+## O. Alcance de la Fase 3.15 (Advanced Combat Abilities & Sensory Telegraphs) — `[IMPLEMENTADO]`
+
+La Fase 3.15 implementó habilidades dinámicas avanzadas, aviso sensorial anticipado, contrataques, protección de terreno e invocación/limpieza de esbirros:
+1. **Telegrafiado Sensorial Declarativo (`TelegraphDefinition` / PRIN-02 / EXP-006):**
+   - Modelo inmutable tipado que especifica duración en ticks, partículas (tipo, conteo, radio) y audio (sonido, volumen, pitch).
+   - El telegrafiado ocurre síncronamente en el hilo principal de Bukkit antes de que ocurra el efecto físico (daño, proyectil o explosión).
+   - Demora desacoplada: el efecto físico no se aplica instantáneamente; queda programado con `DelayedTaskScheduler` y sujeto a cancelación si la sesión concluye.
+   - Tiempos de aviso clasificados formalmente como `TUNING_CANDIDATE`:
+     - `TICKS_MINOR = 16L` (~0.8s)
+     - `TICKS_MODERATE = 30L` (1.5s)
+     - `TICKS_MAJOR = 40L` (2.0s)
+     - `TICKS_LETHAL = 60L` (3.0s)
+2. **Bombardeo Aéreo de TNT (`CARPET_BOMB` / CAND-03):**
+   - Disparo vinculado al estado de vuelo/circling vanilla (`ON_FLIGHT_PHASE`).
+   - Generación de entidades `TNTPrimed` con fuse calibrado (default 80 ticks = 4s, `TUNING_CANDIDATE`) y sellado con PDC (`managed`, `battle_id`, `explosive`).
+3. **Onda Expansiva de Aterrizaje (`SHOCKWAVE` / CAND-04):**
+   - Disparo al perchar/aterrizar en el podio (`ON_FLIGHT_PHASE` en `LAND_ON_PORTAL`).
+   - Genera efecto visual `SONIC_BOOM` y aplica knockback tridimensional e impacto de daño calibrado a jugadores en arena.
+   - Parámetros `TUNING_CANDIDATE`: radio (15.0 bloques), daño (12.0 HP), knockback horizontal (1.5), knockback vertical (0.6).
+4. **Contrataques Reactivos con Cooldown por Atacante (`ON_DAMAGE` / CAND-05):**
+   - Intercepción de daño confirmado en `DragonCombatListener`.
+   - Cooldown reactivo mantenido individualmente por cada jugador atacante en `AbilityCooldownTracker`.
+   - Evita que un contrataque contra el jugador A bloquee respuestas defensivas hacia el jugador B.
+   - Parámetros `TUNING_CANDIDATE`: cooldown (100 ticks = 5s), probabilidad (1.0), tipos de daño (`ENTITY_ATTACK`, `PROJECTILE`).
+5. **Invocación y Barrido Determinista de Esbirros (`SUMMON` / CAND-06):**
+   - Spawneo de minions identificados inequívocamente con 4 firmas PDC:
+     - `betterdragon:managed = true`
+     - `betterdragon:battle_id = <uuid>`
+     - `betterdragon:minion = true`
+     - `betterdragon:minion_type = <tipo>`
+   - Tipo de entidad configurable (default `ENDERMITE`, `TUNING_CANDIDATE`).
+   - Limpieza determinista selectiva en `abort()` y `complete()` que purga exclusivamente los minions asociados a la sesión, sin afectar criaturas naturales ni mobs de otras batallas.
+6. **Protección de Terreno Frente a Explosiones (`DragonExplosionListener`):**
+   - Intercepta `EntityExplodeEvent` y limpia `blockList()` únicamente si la entidad porta la firma `betterdragon:explosive = true`.
+   - Neutralidad total frente a explosiones vanilla externas del servidor.
+7. **Snapshot Isolation & Ciclo de Vida:**
+   - La recarga `/bd reload` no altera habilidades, cooldowns ni telegraphs de batallas activas.
+   - Todas las tareas diferidas se cancelan de inmediato al abortar la batalla (`registerPendingTask`).
+   - Respeto total a la semántica `DEFERRED_PENDING_CHUNK_LOAD`.
+8. **Validación Runtime en Paper 26.1.2-74 (EXP-010 — 10/10 Checks PASS):**
+   - Verificado con 0% NMS sobre la plataforma objetivo.

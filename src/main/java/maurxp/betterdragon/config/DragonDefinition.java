@@ -106,7 +106,7 @@ public record DragonDefinition(
     }
 
     /**
-     * Constructor de conveniencia retrocompatible para definiciones de la Fase 3.13 sin BossBar ni Enrage explícitos.
+     * Constructor de conveniencia retrocompatible para definiciones sin BossBar ni Enrage explícitos.
      */
     public DragonDefinition(
             String id,
@@ -120,7 +120,7 @@ public record DragonDefinition(
     }
 
     /**
-     * Constructor de conveniencia retrocompatible para definiciones previas a la Fase 3.13.
+     * Constructor de conveniencia retrocompatible para definiciones básicas con fases y habilidades.
      */
     public DragonDefinition(String id, List<PhaseDefinition> phases, Map<String, AbilityDefinition> abilities) {
         this(id, null, DragonAttributes.defaults(), DragonScalingDefinition.defaults(), phases, abilities);

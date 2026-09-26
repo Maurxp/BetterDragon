@@ -14,7 +14,7 @@ import java.util.UUID;
  * Evento emitido por BetterDragon cuando un jugador realiza un daño válido contra
  * un BetterDragon gestionado, antes de que dicho daño sea acumulado en el runtime.
  * <p>
- * Semántica de Cancelación (Fase 3.4):
+ * Semántica de Cancelación:
  * <ul>
  *   <li>Si el evento es cancelado, el daño <b>no</b> se acumula en el {@link CombatRuntime}.</li>
  *   <li>La cancelación <b>no consume</b> el contador monotónico {@code hitSequence}.</li>

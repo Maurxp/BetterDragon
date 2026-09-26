@@ -49,7 +49,7 @@ public record DragonBossBarDefinition(
      * Genera el título final formateado reemplazando los placeholders requeridos
      * y traduciendo códigos de color de estilo ampersand ('&' -> '§').
      * <p>
-     * Semántica explícita de Enrage (Fase 3.14-R1):
+     * Semántica explícita de Enrage:
      * <ul>
      *   <li>Si {@code title} contiene {@code {enrage}}, se reemplaza por {@code &c[ENRAGE]} si está activo,
      *       o por cadena vacía {@code ""} si está inactivo.</li>

@@ -32,7 +32,7 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 | **3.12** | **Investigación & Formalización** | Investigación de estado del arte (Paper 26.1.2-74), formalización de decisiones de diseño y catálogo de perfiles. | `COMPLETE` |
 | **3.13** | **Perfiles, Atributos & Scaling** | Catálogo múltiple de perfiles (`DragonCatalog`), atributos (`DragonAttributes`), scaling lineal por jugadores (`DragonScalingCalculator`), snapshot de batalla (`BattleConfigurationSnapshot`), selección en `/bd start`, persistencia PDC extendida. | `COMPLETE` |
 | **3.13-R1** | **Consolidación, Corrección & Cierre** | Corrección de `bd-test-lifecycle`, restauración de invariantes en `DragonDefinition`, semántica Opción A en scaling (`enabled: true` sin modo = `LINEAR`), tuning candidates documentados, eliminación de `catch (Throwable)`, validación `definition_id` en sesión, verificación schema v1, 372 tests. | `COMPLETE` |
-| **3.14** | **Encounter Presentation & Soft Enrage** | BossBar propia independiente con supresión vanilla preservada, cálculo seguro [0.0, 1.0], feedback sensorial de fases, Soft Enrage monotónico false -> true, escalado de cooldown de habilidades, aislamiento de snapshot ante reload, validación EXP-009 (11/11 checks PASS), 416 tests. | `COMPLETE` |
+| **3.15–3.15-R2** | **Advanced Combat Abilities & Sensory Telegraphs (Refinement & Production Hardening)** | Bombardeo aéreo de TNT (`CARPET_BOMB`), Onda expansiva de aterrizaje (`SHOCKWAVE`), Contrataques reactivos con cooldown individual (`ON_DAMAGE`), Invocación de minions (`SUMMON`) con 4 firmas PDC y limpieza determinista, Telegrafiado sensorial previo declarativo (`TelegraphDefinition`), Protección de terreno en explosiones BetterDragon (`blockList().clear()`), Snapshot isolation total, refactorización semántica de tests, purga integral de test hooks en `BetterDragonPlugin.java` (-1115 líneas de test residue, 420 líneas de composition root puro), 0% NMS, 447 tests unitarios/integración (0 fallos, 0 errores), empaquetado de producción limpio. | `COMPLETE` |
 
 ---
 
@@ -441,3 +441,86 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
   - Pruebas en `DragonPdcHandlerTest`: Mismatch de `definition_id`, versiones de esquema no soportadas o inválidas.
   - Pruebas en `DragonCommandSelectionTest`: Selección explícita, fallback a default, rechazo de desconocido y tab completion.
   - **Total de pruebas del proyecto:** 372 pruebas ejecutadas, 0 fallos, 0 errores, 0 omitidos.
+
+---
+
+## 12. Estado de la Fase 3.15 (Advanced Combat Abilities & Sensory Telegraphs) — `DONE`
+
+- **Telegrafiado Sensorial Declarativo (`maurxp.betterdragon.ability`):**
+  - `TelegraphDefinition`: Modelo inmutable (record) desacoplado del efecto físico. Parámetros: `durationTicks`, `particle` (Paper API `org.bukkit.Particle`), `particleCount`, `particleRadius`, `sound` (String con resolución segura), `soundVolume`, `soundPitch`.
+  - Constantes técnicas de calibración marcadas como `TUNING_CANDIDATE`:
+    - `TICKS_MINOR = 16L` (~0.8s)
+    - `TICKS_MODERATE = 30L` (1.5s)
+    - `TICKS_MAJOR = 40L` (2.0s)
+    - `TICKS_LETHAL = 60L` (3.0s)
+  - Despacho 100% síncrono en el hilo principal de Bukkit/Paper. No se introducen operaciones async en entidades, mundo ni partículas.
+  - Demora física previa: el efecto telegrafiado dispara la presentación visual/acústica inmediatamente en el tick 0 y pospone el efecto físico real mediante `DelayedTaskScheduler`.
+- **Habilidades de Combate Declarativas en AbilityEngine (`maurxp.betterdragon.ability.effect`):**
+  - `CarpetBombEffect` (`CARPET_BOMB` / CAND-03): Disparado durante vuelo/circling (`ON_FLIGHT_PHASE`). Genera entidades `TNTPrimed` con firma PDC (`managed`, `battle_id`, `explosive`) y fuse ticks calibrado.
+  - `ShockwaveEffect` (`SHOCKWAVE` / CAND-04): Disparado en aterrizaje/perching (`ON_FLIGHT_PHASE`). Aplica daño y vector tridimensional radial de knockback a jugadores elegibles dentro de los límites de la arena, con efecto visual `SONIC_BOOM`.
+  - `SummonEffect` (`SUMMON` / CAND-06): Spawnea entidades de apoyo con firma completa de 4 claves PDC (`managed=true`, `battle_id`, `minion=true`, `minion_type`). Tipo de entidad configurable con fallback seguro (`ENDERMITE` como `TUNING_CANDIDATE`).
+- **Contrataques Reactivos con Cooldown por Atacante (`ON_DAMAGE` / CAND-05):**
+  - Triggers activados en `DragonCombatListener` al recibir daño físico confirmado.
+  - Filtrado estricto por tipo de daño (`damage-types`).
+  - `AbilityCooldownTracker.setAttackerCooldown()` / `isReady(abilityId, attackerUuid, tick)`: Cooldown reactivo mantenido individualmente por atacante, impidiendo que el bloqueo de un jugador inhabilite contrataques hacia otros atacantes.
+  - Cooldown base (100 ticks = 5s) catalogado como `TUNING_CANDIDATE`.
+- **Protección de Terreno (`maurxp.betterdragon.combat.DragonExplosionListener`):**
+  - Intercepta `EntityExplodeEvent` verificando las firmas PDC `managed=true` y `explosive=true`.
+  - Para explosiones de BetterDragon: vacía `event.blockList()`, eliminando 100% la destrucción de bloques del End mientras preserva íntegro el daño a jugadores y entidades.
+  - Para explosiones externas/vanilla: neutralidad absoluta; no modifica `blockList()`. Cero banderas globales de supresión.
+- **Identificación y Limpieza Determinista de Esbirros (PDC):**
+  - Minions sellados con:
+    - `betterdragon:managed = true` (BOOLEAN)
+    - `betterdragon:battle_id = <uuid>` (STRING)
+    - `betterdragon:minion = true` (BOOLEAN)
+    - `betterdragon:minion_type = <id>` (STRING)
+  - Limpieza determinista selectiva en `BattleSession.cleanSessionMinions()`: elimina exclusivamente los minions vinculados al `battleId` de la sesión activa durante `abort()` y `complete()`. 0% falsos positivos sobre mobs foráneos.
+- **Ciclo de Vida y Resiliencia (`BattleSession` & `DelayedTaskScheduler`):**
+  - `CancellableTask`: Registro y seguimiento de todas las tareas diferidas generadas por habilidades telegrafiadas.
+  - Al abortar o terminar la sesión, todas las tareas diferidas son canceladas/invalidadas de forma inmediata, garantizando cero efectos residuales tras el fin de la batalla.
+  - Respeto total al estado `DEFERRED_PENDING_CHUNK_LOAD`: no se destruyen datos ni se altera la sesión ante descargas de chunks.
+- **Aislamiento de Snapshot (Snapshot Isolation):**
+  - Todas las definiciones de habilidades, telegrafiado, cooldowns y parámetros provienen de `BattleConfigurationSnapshot`.
+  - La recarga `/bd reload` no muta ni altera ninguna batalla activa en curso.
+- **Anti-Sobrearquitectura y Cero NMS:**
+  - 0% NMS en todo el subsistema de habilidades, combate, listeners y dominio.
+  - Triggers genéricos `ON_FLIGHT_PHASE` y `ON_DAMAGE` sin proliferación redundante de enums.
+- **Validación Runtime en Paper 26.1.2-74 (EXP-010 — 10/10 Checks PASS):**
+  - Check 1: AbilityEngine activo y operativo en BattleSession (`PASS`).
+  - Check 2: Firma PDC en TNT (`managed`, `battle_id`, `explosive`) (`PASS`).
+  - Check 3: Supresión de daño a bloques en explosiones BetterDragon (`PASS`).
+  - Check 3B: Conservación intacta de explosiones vanilla externas (`PASS`).
+  - Check 4: Ejecución de Shockwave radial y cálculo de knockback (`PASS`).
+  - Check 5: Contrataque reactivo con cooldown por atacante e independencia (`PASS`).
+  - Check 6: Invocación de minions con 4 claves PDC (`PASS`).
+  - Check 7: Limpieza determinista de esbirros sin afectar mobs foráneos (`PASS`).
+  - Check 8: Telegrafiado sensorial previo declarativo en hilo principal (`PASS`).
+  - Check 9: Cancelación de tareas diferidas al abortar (`PASS`).
+  - Check 10: Snapshot isolation frente a reload (`PASS`).
+- **Pruebas Automatizadas y Cobertura:**
+  - `TelegraphDefinitionTest` (5 tests): Validación de invariantes, sound, partículas, defaults y candidatos de tuning.
+  - `AbilityCooldownTrackerTest` (9 tests): Cooldowns globales y por atacante, independencia y monotonicidad de ticks.
+  - `AbilityEngineTelegraphTest` (4 tests): Postergación de efecto físico, disparo síncrono de telegraph en Bukkit thread.
+  - `DragonExplosionListenerTest` (3 tests): Vaciado de blockList() para BetterDragon, neutralidad para vanilla y entidades nulas.
+  - `MinionPdcAndCleanupTest` (4 tests): Validación de 4 claves PDC, sweep determinista por battle_id, protección de mobs ajenos.
+  - `AbilityConfigurationLoaderTest` (3 tests): Deserialización tipada de `telegraph`, shorthand, flight phase y snapshot isolation.
+  - `CarpetBombEffectTest` (3 tests): Generación de proyectiles TNT con firma PDC (3 claves), fuse ticks y dispersión.
+  - `ShockwaveEffectTest` (2 tests): Impulso vectorial tridimensional, daño en podio y discriminación radial de jugadores.
+  - **Total de pruebas del proyecto:** 447 pruebas ejecutadas, 0 fallos, 0 errores, 0 omitidos. Build Success.
+
+---
+
+## 13. Estado de la Fase 3.15-R1 / 3.15-R2 (Refinamiento Semántico, Purga de Test Hooks y Cierre de Calidad) — `DONE`
+
+- **Refinamiento Semántico de Tests:**
+  - Sustitución de prefijos temporales de fase (`Phase315*`) por nomenclatura semántica permanente basada en responsabilidad real: `AbilityConfigurationLoaderTest`, `AbilityEngineTelegraphTest`, integración de cooldowns por atacante en `AbilityCooldownTrackerTest`, e incorporación de pruebas unitarias especializadas `CarpetBombEffectTest` y `ShockwaveEffectTest`.
+  - Cero ocurrencias de nombres acoplados a la fase en código de producción ni pruebas.
+- **Auditoría de Producción y Desacoplamiento de `BetterDragonPlugin.java`:**
+  - `BetterDragonPlugin` consolidado exclusivamente como *Composition Root / Bootstrap* desacoplado de lógica de simulación o prueba.
+  - Eliminación integral de la infraestructura temporal de testing heredada: `onServerCommand()`, comandos `bd-test-*` (`bd-test-lifecycle`, `bd-test-combat`, `bd-test-phases`, `bd-test-arena`, `bd-test-victory`, `bd-test-rewards`, `bd-test-abilities`), métodos `run*Verification()`, apagado forzado del servidor post-test (`Bukkit::shutdown`) y auto-registro como `Listener`.
+  - Reducción neta de 1,115 líneas de código de testing temporal en producción (de 1,513 a 420 líneas).
+- **Cobertura de Pruebas Automatizada en `src/test/java`:**
+  - 447 tests unitarios e integrados automatizados ejecutados en Maven (`BUILD SUCCESS`, 0 failures, 0 errors, 0 skipped).
+  - Cobertura total de los subsistemas de ciclo de vida, combate, fases, arenas, victoria, recompensas, leaderboard, presentación, bossbars, y habilidades avanzadas con telegrafiado sensorial.
+- **Empaquetado de Producción:**
+  - Artefacto sombreado (`shaded JAR`) libre de clases de test, harnesses de laboratorio o scripts externos.

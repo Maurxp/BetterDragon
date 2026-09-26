@@ -12,7 +12,7 @@ import org.bukkit.World;
  * <ul>
  * <li><b>Separación Semántica Estricta:</b> Desacopla la ubicación física del podium/portal
  * de salida del End (nivel de pedestal) del centro espacial de la arena de combate.</li>
- * <li><b>Contexto Espacial Real (Fase 3.6):</b> Provee acceso a los límites reales ({@link ArenaBounds})
+ * <li><b>Contexto Espacial Real:</b> Provee acceso a los límites reales ({@link ArenaBounds})
  * y al conjunto de reglas ({@link ArenaRuleSet}) de la arena asociada a la batalla.</li>
  * </ul>
  *

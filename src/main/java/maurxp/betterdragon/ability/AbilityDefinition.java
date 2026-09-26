@@ -20,6 +20,7 @@ import java.util.Objects;
  * @param effectOrigin   punto de origen espacial del efecto
  * @param effectType     tipo de efecto a desplegar
  * @param properties     mapa inmutable de parámetros específicos del efecto (daño, velocidad, partículas, etc.)
+ * @param telegraph      definición opcional de telegrafiado sensorial previo al efecto físico
  * @author maurxp
  */
 public record AbilityDefinition(
@@ -29,7 +30,8 @@ public record AbilityDefinition(
         TargetSelectorType targetSelector,
         EffectOriginType effectOrigin,
         AbilityEffectType effectType,
-        Map<String, Object> properties) {
+        Map<String, Object> properties,
+        TelegraphDefinition telegraph) {
 
     public AbilityDefinition {
         Objects.requireNonNull(id, "El id de la habilidad no puede ser nulo");
@@ -47,7 +49,21 @@ public record AbilityDefinition(
     }
 
     /**
-     * Constructor de conveniencia con propiedades vacías.
+     * Constructor para definición sin telegrafiado sensorial previo.
+     */
+    public AbilityDefinition(
+            String id,
+            AbilityTrigger trigger,
+            long cooldownTicks,
+            TargetSelectorType targetSelector,
+            EffectOriginType effectOrigin,
+            AbilityEffectType effectType,
+            Map<String, Object> properties) {
+        this(id, trigger, cooldownTicks, targetSelector, effectOrigin, effectType, properties, null);
+    }
+
+    /**
+     * Constructor de conveniencia con propiedades vacías y sin telegrafiado.
      */
     public AbilityDefinition(
             String id,
@@ -56,14 +72,25 @@ public record AbilityDefinition(
             TargetSelectorType targetSelector,
             EffectOriginType effectOrigin,
             AbilityEffectType effectType) {
-        this(id, trigger, cooldownTicks, targetSelector, effectOrigin, effectType, Map.of());
+        this(id, trigger, cooldownTicks, targetSelector, effectOrigin, effectType, Map.of(), null);
+    }
+
+    private Object lookupProperty(String key) {
+        Object val = properties.get(key);
+        if (val == null && key != null) {
+            val = properties.get(key.replace('_', '-'));
+            if (val == null) {
+                val = properties.get(key.replace('-', '_'));
+            }
+        }
+        return val;
     }
 
     /**
      * Obtiene una propiedad de tipo Double de forma segura.
      */
     public double getDoubleProperty(String key, double defaultValue) {
-        Object val = properties.get(key);
+        Object val = lookupProperty(key);
         if (val instanceof Number n) {
             return n.doubleValue();
         }
@@ -74,9 +101,20 @@ public record AbilityDefinition(
      * Obtiene una propiedad de tipo Integer de forma segura.
      */
     public int getIntProperty(String key, int defaultValue) {
-        Object val = properties.get(key);
+        Object val = lookupProperty(key);
         if (val instanceof Number n) {
             return n.intValue();
+        }
+        return defaultValue;
+    }
+
+    /**
+     * Obtiene una propiedad de tipo Long de forma segura.
+     */
+    public long getLongProperty(String key, long defaultValue) {
+        Object val = lookupProperty(key);
+        if (val instanceof Number n) {
+            return n.longValue();
         }
         return defaultValue;
     }
@@ -85,7 +123,35 @@ public record AbilityDefinition(
      * Obtiene una propiedad de tipo String de forma segura.
      */
     public String getStringProperty(String key, String defaultValue) {
-        Object val = properties.get(key);
+        Object val = lookupProperty(key);
         return val != null ? val.toString() : defaultValue;
+    }
+
+    /**
+     * Obtiene una propiedad de tipo Booleano de forma segura.
+     */
+    public boolean getBooleanProperty(String key, boolean defaultValue) {
+        Object val = lookupProperty(key);
+        if (val instanceof Boolean b) {
+            return b;
+        }
+        if (val != null) {
+            return Boolean.parseBoolean(val.toString());
+        }
+        return defaultValue;
+    }
+
+    /**
+     * Indica si esta habilidad cuenta con un aviso telegrafiado previo a su ejecución física.
+     */
+    public boolean hasTelegraph() {
+        return telegraph != null;
+    }
+
+    /**
+     * Retorna el telegrafiado sensorial encapsulado en un Optional.
+     */
+    public java.util.Optional<TelegraphDefinition> getTelegraph() {
+        return java.util.Optional.ofNullable(telegraph);
     }
 }

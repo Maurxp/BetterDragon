@@ -1,14 +1,22 @@
 package maurxp.betterdragon.ability;
 
 import maurxp.betterdragon.ability.effect.AbilityEffect;
+import maurxp.betterdragon.ability.effect.CarpetBombEffect;
 import maurxp.betterdragon.ability.effect.DamageEffect;
 import maurxp.betterdragon.ability.effect.KnockbackEffect;
 import maurxp.betterdragon.ability.effect.ParticleEffect;
+import maurxp.betterdragon.ability.effect.ShockwaveEffect;
 import maurxp.betterdragon.ability.effect.SoundEffect;
+import maurxp.betterdragon.ability.effect.SummonEffect;
 import maurxp.betterdragon.battle.BattleSession;
 import maurxp.betterdragon.phase.PhaseDefinition;
 import maurxp.betterdragon.arena.ArenaDefinition;
+import maurxp.betterdragon.util.CancellableTask;
+import maurxp.betterdragon.util.DelayedTaskScheduler;
 import org.bukkit.Location;
+import org.bukkit.Particle;
+import org.bukkit.Sound;
+import org.bukkit.World;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Player;
 
@@ -17,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -26,9 +35,9 @@ import java.util.logging.Logger;
  * Responsabilidades:
  * <ul>
  * <li>Consultar catálogo de habilidades provisto por el snapshot inmutable.</li>
- * <li>Comprobar y actualizar tiempos de recarga (cooldowns) en ticks lógicos.</li>
+ * <li>Comprobar y actualizar tiempos de recarga (cooldowns) en ticks lógicos (global y por atacante).</li>
  * <li>Resolver objetivos y ubicaciones de origen.</li>
- * <li>Despachar efectos encapsulando excepciones para resiliencia total del servidor.</li>
+ * <li>Despachar efectos y telegrafiado sensorial encapsulando excepciones para resiliencia total del servidor.</li>
  * <li><b>0% NMS y Cero Persistencia/Rewards:</b> Desacoplado totalmente de almacenamiento y reglas de juego finales.</li>
  * </ul>
  *
@@ -41,6 +50,7 @@ public class AbilityEngine {
     private final TargetSelector targetSelector;
     private final LocationResolver locationResolver;
     private final Map<AbilityEffectType, AbilityEffect> effectRegistry;
+    private final DelayedTaskScheduler delayedTaskScheduler;
     private final Logger logger;
 
     public AbilityEngine(
@@ -49,11 +59,29 @@ public class AbilityEngine {
             TargetSelector targetSelector,
             LocationResolver locationResolver,
             Map<AbilityEffectType, AbilityEffect> customEffectRegistry,
+            DelayedTaskScheduler delayedTaskScheduler,
             Logger logger) {
         this.abilityCatalog = abilityCatalog != null ? Map.copyOf(abilityCatalog) : Map.of();
         this.cooldownTracker = Objects.requireNonNull(cooldownTracker, "cooldownTracker no puede ser nulo");
         this.targetSelector = Objects.requireNonNull(targetSelector, "targetSelector no puede ser nulo");
         this.locationResolver = Objects.requireNonNull(locationResolver, "locationResolver no puede ser nulo");
+        this.delayedTaskScheduler = delayedTaskScheduler != null ? delayedTaskScheduler : (runnable, delay) -> {
+            if (delay <= 0) {
+                runnable.run();
+                return () -> {};
+            }
+            try {
+                org.bukkit.scheduler.BukkitTask bt = org.bukkit.Bukkit.getScheduler().runTaskLater(
+                        org.bukkit.plugin.java.JavaPlugin.getProvidingPlugin(AbilityEngine.class),
+                        runnable,
+                        delay
+                );
+                return bt::cancel;
+            } catch (Exception | LinkageError e) {
+                runnable.run();
+                return () -> {};
+            }
+        };
         this.logger = logger != null ? logger : Logger.getLogger("BetterDragon-AbilityEngine");
 
         this.effectRegistry = new EnumMap<>(AbilityEffectType.class);
@@ -63,11 +91,22 @@ public class AbilityEngine {
         }
     }
 
+    public AbilityEngine(
+            Map<String, AbilityDefinition> abilityCatalog,
+            AbilityCooldownTracker cooldownTracker,
+            TargetSelector targetSelector,
+            LocationResolver locationResolver,
+            Map<AbilityEffectType, AbilityEffect> customEffectRegistry,
+            Logger logger) {
+        this(abilityCatalog, cooldownTracker, targetSelector, locationResolver, customEffectRegistry, null, logger);
+    }
+
     public AbilityEngine(Map<String, AbilityDefinition> abilityCatalog, BattleSpatialContext spatialContext, Logger logger) {
         this(abilityCatalog,
                 new AbilityCooldownTracker(),
                 new TargetSelector(Objects.requireNonNull(spatialContext, "spatialContext no puede ser nulo")),
                 new LocationResolver(Objects.requireNonNull(spatialContext, "spatialContext no puede ser nulo")),
+                null,
                 null,
                 logger);
     }
@@ -81,6 +120,9 @@ public class AbilityEngine {
         effectRegistry.put(AbilityEffectType.KNOCKBACK, new KnockbackEffect());
         effectRegistry.put(AbilityEffectType.PARTICLE, new ParticleEffect());
         effectRegistry.put(AbilityEffectType.SOUND, new SoundEffect());
+        effectRegistry.put(AbilityEffectType.CARPET_BOMB, new CarpetBombEffect());
+        effectRegistry.put(AbilityEffectType.SHOCKWAVE, new ShockwaveEffect());
+        effectRegistry.put(AbilityEffectType.SUMMON, new SummonEffect());
     }
 
     /**
@@ -158,9 +200,19 @@ public class AbilityEngine {
             return false;
         }
 
-        // 2. Validar cooldown en ticks lógicos
-        if (!cooldownTracker.isReady(abilityId, currentTick)) {
-            return false;
+        // 2. Validar cooldown en ticks lógicos (global y específico por atacante si aplica)
+        UUID attackerUuid = (triggeringPlayer != null && triggeringPlayer.isPresent())
+                ? triggeringPlayer.get().getUniqueId()
+                : null;
+
+        if (trigger == AbilityTrigger.ON_DAMAGE && attackerUuid != null) {
+            if (!cooldownTracker.isReady(abilityId, attackerUuid, currentTick)) {
+                return false;
+            }
+        } else {
+            if (!cooldownTracker.isReady(abilityId, currentTick)) {
+                return false;
+            }
         }
 
         // 3. Resolver origen y objetivos de forma espacialmente coherente (R1: orden Origin -> Target)
@@ -199,7 +251,7 @@ public class AbilityEngine {
                     triggeringPlayer);
         }
 
-        // 4. Construir contexto inmutable
+        // 4. Construir contexto inmutable con puente para registro de entidades secundarias
         AbilityExecutionContext context = new AbilityExecutionContext(
                 session.getBattleId(),
                 session.getWorldName(),
@@ -210,7 +262,8 @@ public class AbilityEngine {
                 resolvedOrigin,
                 currentTick,
                 ability,
-                phase);
+                phase,
+                session::registerMinion);
 
         // 5. Obtener efecto del registro
         AbilityEffect effect = effectRegistry.get(ability.effectType());
@@ -219,15 +272,59 @@ public class AbilityEngine {
             return false;
         }
 
-        // 6. Ejecutar de forma segura capturando solo Exception (R1: no silenciar Throwable/Error graves)
-        try {
-            effect.execute(context);
-        } catch (Exception e) {
-            logger.log(Level.WARNING, "[BetterDragon] Error durante la ejecución de la habilidad '" + abilityId + "': " + e.getMessage(), e);
-            return false;
+        // 6. Ejecutar telegrafiado sensorial previo y efecto físico (PRIN-02, EXP-006)
+        if (ability.hasTelegraph()) {
+            TelegraphDefinition telegraph = ability.telegraph();
+            World world = resolvedOrigin.getWorld();
+            if (world != null) {
+                try {
+                    world.spawnParticle(
+                            telegraph.particle(),
+                            resolvedOrigin,
+                            Math.max(1, telegraph.particleCount()),
+                            telegraph.particleRadius(),
+                            0.5,
+                            telegraph.particleRadius(),
+                            0.05);
+                    world.playSound(
+                            resolvedOrigin,
+                            telegraph.sound(),
+                            telegraph.soundVolume(),
+                            telegraph.soundPitch());
+                } catch (Exception ignored) {
+                }
+            }
+
+            if (telegraph.durationTicks() > 0) {
+                CancellableTask cancellable = delayedTaskScheduler.schedule(() -> {
+                    if (session == null || !session.isActive() || session.isTerminal()) {
+                        return;
+                    }
+                    try {
+                        effect.execute(context);
+                    } catch (Exception e) {
+                        logger.log(Level.WARNING, "[BetterDragon] Error durante la ejecución diferida de '" + abilityId + "': " + e.getMessage(), e);
+                    }
+                }, telegraph.durationTicks());
+                session.registerPendingTask(cancellable);
+            } else {
+                try {
+                    effect.execute(context);
+                } catch (Exception e) {
+                    logger.log(Level.WARNING, "[BetterDragon] Error durante la ejecución de la habilidad '" + abilityId + "': " + e.getMessage(), e);
+                    return false;
+                }
+            }
+        } else {
+            try {
+                effect.execute(context);
+            } catch (Exception e) {
+                logger.log(Level.WARNING, "[BetterDragon] Error durante la ejecución de la habilidad '" + abilityId + "': " + e.getMessage(), e);
+                return false;
+            }
         }
 
-        // 7. Actualizar cooldown tras ejecución exitosa (Fase 3.14: Soft Enrage Cooldown Multiplier)
+        // 7. Actualizar cooldown tras ejecución exitosa (Soft Enrage Cooldown Multiplier)
         long baseCooldown = ability.cooldownTicks();
         double multiplier = (session != null && session.getConfigSnapshot() != null
                 && session.getConfigSnapshot().dragonDefinition() != null
@@ -237,7 +334,89 @@ public class AbilityEngine {
         boolean enrageActive = session != null && session.isEnrageActive();
         long effectiveCooldown = calculateEffectiveCooldown(baseCooldown, enrageActive, multiplier);
         cooldownTracker.setCooldown(abilityId, currentTick, effectiveCooldown);
+
+        if (trigger == AbilityTrigger.ON_DAMAGE && attackerUuid != null) {
+            long attackerCooldown = Math.max(1L, ability.getIntProperty("attacker_cooldown_ticks", 100)); // TUNING_CANDIDATE: 5.0s
+            cooldownTracker.setAttackerCooldown(abilityId, attackerUuid, currentTick, attackerCooldown);
+        }
         return true;
+    }
+
+    /**
+     * Evalúa y ejecuta las habilidades sincronizadas con la fase de vuelo de Paper (CAND-03, CAND-04).
+     *
+     * @param flightPhase fase de vuelo nativa de Paper a la que transicionó el dragón
+     * @param phase       fase de combate activa
+     * @param session     sesión de batalla activa
+     * @param dragon      entidad física del dragón
+     * @param currentTick tick lógico actual
+     */
+    public void triggerFlightPhaseAbilities(
+            org.bukkit.entity.EnderDragon.Phase flightPhase,
+            PhaseDefinition phase,
+            BattleSession session,
+            EnderDragon dragon,
+            long currentTick) {
+        if (flightPhase == null || phase == null || session == null || dragon == null) {
+            return;
+        }
+
+        for (String abilityId : phase.abilityIds()) {
+            AbilityDefinition ability = abilityCatalog.get(abilityId);
+            if (ability != null && ability.trigger() == AbilityTrigger.ON_FLIGHT_PHASE) {
+                String targetFlightPhase = ability.getStringProperty("flight_phase", "");
+                if (targetFlightPhase.equalsIgnoreCase(flightPhase.name())) {
+                    if (cooldownTracker.isReady(abilityId, currentTick)) {
+                        executeAbility(abilityId, phase, session, dragon, AbilityTrigger.ON_FLIGHT_PHASE,
+                                Optional.empty(), Optional.empty(), currentTick);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Evalúa y ejecuta contrataques reactivos por daño recibido (CAND-05).
+     *
+     * @param phase          fase de combate activa
+     * @param session        sesión de batalla activa
+     * @param dragon         entidad física del dragón
+     * @param attacker       jugador responsable del ataque
+     * @param isRanged       true si el daño provino de un proyectil o ataque a distancia
+     * @param damageLocation ubicación donde impactó el ataque
+     * @param currentTick    tick lógico actual
+     */
+    public void triggerDamageAbilities(
+            PhaseDefinition phase,
+            BattleSession session,
+            EnderDragon dragon,
+            Player attacker,
+            boolean isRanged,
+            Location damageLocation,
+            long currentTick) {
+        if (phase == null || session == null || dragon == null || attacker == null) {
+            return;
+        }
+
+        for (String abilityId : phase.abilityIds()) {
+            AbilityDefinition ability = abilityCatalog.get(abilityId);
+            if (ability != null && ability.trigger() == AbilityTrigger.ON_DAMAGE) {
+                boolean rangedOnly = ability.getBooleanProperty("ranged_only", true); // CAND-05: disuade campeo a distancia
+                if (rangedOnly && !isRanged) {
+                    continue;
+                }
+
+                double chance = Math.clamp(ability.getDoubleProperty("chance", 1.0), 0.0, 1.0);
+                if (chance < 1.0 && java.util.concurrent.ThreadLocalRandom.current().nextDouble() > chance) {
+                    continue;
+                }
+
+                if (cooldownTracker.isReady(abilityId, attacker.getUniqueId(), currentTick)) {
+                    executeAbility(abilityId, phase, session, dragon, AbilityTrigger.ON_DAMAGE,
+                            Optional.of(attacker), Optional.ofNullable(damageLocation), currentTick);
+                }
+            }
+        }
     }
 
     /**

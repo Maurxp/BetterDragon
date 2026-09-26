@@ -38,9 +38,9 @@ import java.util.logging.Logger;
  *       que la entidad existe en el mundo y porta el PDC correcto de BetterDragon.</li>
  *   <li><b>Limpieza Idempotente ante Fallos:</b> Si el spawn falla o la entidad no valida, limpia cualquier
  *       rastro, remueve la sesión de memoria y marca la sesión como abortada.</li>
- *   <li><b>Disponibilidad Determinista de Arena (Fase 3.6):</b> Valida que la arena exista, sus límites
+ *   <li><b>Disponibilidad Determinista de Arena:</b> Valida que la arena exista, sus límites
  *       sean coherentes y el mundo esté disponible antes de iniciar la batalla. Cero fallbacks hardcodeados.</li>
- *   <li><b>Finalización Idempotente de Victoria (Fase 3.7):</b> Procesa {@code EntityDeathEvent}, transiciona
+ *   <li><b>Finalización Idempotente de Victoria:</b> Procesa {@code EntityDeathEvent}, transiciona
  *       {@code ACTIVE -> DYING -> COMPLETED}, resuelve el Slayer (TOP_DAMAGE) y emite {@link BetterDragonVictoryEvent}.</li>
  * </ul>
  *
@@ -135,7 +135,7 @@ public class BattleManager {
             throw new IllegalStateException("Ya existe una sesión de batalla activa para el mundo: " + world.getName());
         }
 
-        // 3. Resolución y disponibilidad de arena (Fase 3.6)
+        // 3. Resolución y disponibilidad de arena
         String targetArenaId = (arenaId != null && !arenaId.isBlank()) ? arenaId.trim() : "default";
         ArenaDefinition arena = null;
 

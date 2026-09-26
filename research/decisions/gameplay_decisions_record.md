@@ -105,36 +105,36 @@
 * **Implementation Target:** Fase 3.16.
 
 ### CAND-03: Bombardeo Aéreo de TNT con Terreno Inmune
-* **Status:** `CANDIDATE`
+* **Status:** `IMPLEMENTED / VALIDATED (EXP-010)`
 * **Evidence:** Referencia histórica externa: KaevonD BetterDragon GitHub (commit `d05ad7f`: `MyListener.java`) (`SOURCE_CODE (external historical source code) / MEDIUM`; material externo no distribuido en este repositorio).
 * **Rationale:** Convierte la fase de vuelo circular (`CIRCLING`), tradicionalmente pasiva, en una fase activa que exige esquivas dinámicas en tierra.
-* **Consequences:** Genera proyectiles de dinamita con daño a bloques cancelado en `EntityExplodeEvent`.
-* **Validation Needed:** Verificar que el spawn de entidades no genere tirones de rendimiento en el servidor.
-* **Implementation Target:** Fase 3.15.
+* **Consequences:** Genera proyectiles de dinamita con daño a bloques cancelado en `EntityExplodeEvent` mediante firma PDC `betterdragon:explosive`.
+* **Validation:** `EXP-010 (PASS)` — Confirmada supresión total de destrucción de bloques y preservación del daño e impulso a entidades.
+* **Implementation Target:** Fase 3.15 (Completada).
 
 ### CAND-04: Onda Expansiva al Aterrizar en el Podio (*Perch Shockwave*)
-* **Status:** `CANDIDATE`
+* **Status:** `IMPLEMENTED / VALIDATED (EXP-010)`
 * **Evidence:** Referencia histórica externa: KaevonD BetterDragon GitHub (commit `d05ad7f`: `MyListener.java`) (`SOURCE_CODE (external historical source code) / MEDIUM`; material externo no distribuido en este repositorio).
 * **Rationale:** Castiga el campeo preventivo en el podio de bedrock cuando el dragón aterriza, emitiendo un anillo expansivo de partículas con empuje vertical y daño calibrado.
-* **Consequences:** Evita la trampa de KaevonD (que forzaba la salud a 1 HP) usando daño porcentual o numérico moderado.
-* **Validation Needed:** Calibrar radio de expansión y velocidad de propagación.
-* **Implementation Target:** Fase 3.15.
+* **Consequences:** Evita la trampa de KaevonD (que forzaba la salud a 1 HP) usando daño numérico moderado y empuje tridimensional radial dentro de la arena.
+* **Validation:** `EXP-010 (PASS)` — Ejecución radial y cálculo de empuje comprobado con 0% NMS.
+* **Implementation Target:** Fase 3.15 (Completada).
 
 ### CAND-05: Contrataques Reactivos por Daño Recibido
-* **Status:** `CANDIDATE`
+* **Status:** `IMPLEMENTED / VALIDATED (EXP-010)`
 * **Evidence:** Referencia histórica externa: KaevonD BetterDragon GitHub (commit `d05ad7f`: `MyListener.java`) (`SOURCE_CODE (external historical source code) / MEDIUM`; material no distribuido) y documentación pública SpigotMC recurso 81439 (`DOCUMENTED / MEDIUM`).
 * **Rationale:** Disuade el ataque seguro e ininterrumpido a larga distancia desde torres elevadas.
-* **Consequences:** Dispara un proyectil o rayo cosmético con cooldown individual por agresor.
-* **Validation Needed:** Playtest de tasa de activación para evitar spam descontrolado.
-* **Implementation Target:** Fase 3.15.
+* **Consequences:** Dispara habilidades defensivas con cooldown individualizado por atacante en `AbilityCooldownTracker`.
+* **Validation:** `EXP-010 (PASS)` — Cooldown por atacante comprobado: el cooldown de un jugador no bloquea respuestas ante otros agresores.
+* **Implementation Target:** Fase 3.15 (Completada).
 
 ### CAND-06: Invocación de Esbirros con Limpieza Garantizada vía PDC
-* **Status:** `CANDIDATE`
+* **Status:** `IMPLEMENTED / VALIDATED (EXP-010)`
 * **Evidence:** Literatura de diseño de raid bosses (`DOCUMENTED / MEDIUM`) y modelo de persistencia PDC propio en BetterDragon (`SOURCE_CODE / HIGH`).
 * **Rationale:** Divide la atención de los jugadores e introduce presión sobre el grupo de combate.
-* **Consequences:** Cada mob invocado portará etiquetas PDC (`betterdragon:managed = true`, `betterdragon:battle_id = <uuid>`), permitiendo una limpieza inmediata y exhaustiva al culminar la sesión.
-* **Validation Needed:** Validación del sweep de entidades en `EXP-007 (PENDING)`.
-* **Implementation Target:** Fase 3.15.
+* **Consequences:** Cada mob invocado porta 4 etiquetas PDC (`managed=true`, `battle_id`, `minion=true`, `minion_type`), permitiendo una limpieza determinista exhaustiva al culminar o abortar la sesión.
+* **Validation:** `EXP-010 (PASS)` — Limpieza selectiva verificada con 0% impacto sobre mobs naturales foráneos.
+* **Implementation Target:** Fase 3.15 (Completada).
 
 ### CAND-07: Confinamiento y Retorno a la Arena (*Void Tether*)
 * **Status:** `CANDIDATE`
@@ -185,7 +185,17 @@
 | **Bed Damage Mult.** | `0.05` | `TUNING_CANDIDATE` | Reduce el daño de camas en 95%, volviendo la estrategia ineficiente. | Prueba de combate con camas (`EXP-004`). |
 | **Enrage Threshold** | `0.20` | `TUNING_CANDIDATE` | Se activa cuando la vida cae por debajo del 20%. | Medición de picos de tensión al cierre. |
 | **Enrage Cooldown Mult.** | `0.75` | `TUNING_CANDIDATE` | Acelera la recarga de habilidades un 25% durante Enrage. | Validación runtime (`EXP-009`) y playtests. |
-| **Counterattack Cooldown**| `5.0 s` | `TUNING_CANDIDATE` | Límite de un contragolpe cada 5s por jugador para evitar spam. | Pruebas de fuego rápido con arco. |
+| **Counterattack Cooldown**| `5.0 s` | `TUNING_CANDIDATE` | Límite de un contragolpe cada 5s por jugador para evitar spam. | Pruebas de fuego rápido con arco (`EXP-010`). |
+| **Counterattack Chance**  | `0.50`  | `TUNING_CANDIDATE` | Probabilidad del 50% de activar contrataque ante daño elegible. | Validación runtime (`EXP-010`). |
+| **Carpet Bomb TNT Count** | `3`     | `TUNING_CANDIDATE` | Número de cargas explosivas lanzadas durante el bombardeo. | Pruebas de evasión aérea (`EXP-010`). |
+| **Carpet Bomb Fuse Ticks**| `60`    | `TUNING_CANDIDATE` | Tiempo de espoleta de la dinamita BetterDragon (3.0s). | Verificación de telegrafiado (`EXP-010`). |
+| **Carpet Bomb Spread**    | `3.5`   | `TUNING_CANDIDATE` | Radio de dispersión horizontal de las cargas arrojadas. | Validación runtime (`EXP-010`). |
+| **Perch Shockwave Radius**| `8.0`   | `TUNING_CANDIDATE` | Radio de efecto de la onda expansiva al aterrizar en el podio. | Validación perimetral (`EXP-010`). |
+| **Perch Shockwave Damage**| `6.0`   | `TUNING_CANDIDATE` | Daño plano aplicado por la onda expansiva en el podio. | Validación de combate (`EXP-010`). |
+| **Perch Shockwave Knockback**| `1.2`| `TUNING_CANDIDATE` | Magnitud del impulso vertical y radial transmitido a jugadores. | Validación física (`EXP-010`). |
+| **Minion Summon Count**   | `3`     | `TUNING_CANDIDATE` | Cantidad de esbirros invocados por evento de spawn. | Pruebas de carga y PDC (`EXP-010`). |
+| **Minion Summon Type**    | `ENDERMITE` | `TUNING_CANDIDATE` | Tipo de entidad esbirro (configurable, no hardcodeado). | Verificación de sweep PDC (`EXP-010`). |
+| **Minion Spawn Spread**   | `4.0`   | `TUNING_CANDIDATE` | Radio de dispersión de invocación respecto a la ubicación objetivo. | Validación espacial (`EXP-010`). |
 
 ---
 

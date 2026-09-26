@@ -4,20 +4,27 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.UUID;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Pruebas unitarias para {@link AbilityCooldownTracker}.
+ * Pruebas unitarias para {@link AbilityCooldownTracker}, cubriendo recargas globales
+ * y recargas individualizadas por atacante.
  *
  * @author maurxp
  */
 class AbilityCooldownTrackerTest {
 
     private AbilityCooldownTracker tracker;
+    private UUID playerA;
+    private UUID playerB;
 
     @BeforeEach
     void setUp() {
         tracker = new AbilityCooldownTracker();
+        playerA = UUID.randomUUID();
+        playerB = UUID.randomUUID();
     }
 
     @Test
@@ -65,5 +72,48 @@ class AbilityCooldownTrackerTest {
     void testNullAbilityId() {
         assertThrows(NullPointerException.class, () -> tracker.isReady(null, 100L));
         assertThrows(NullPointerException.class, () -> tracker.setCooldown(null, 100L, 20L));
+    }
+
+    @Test
+    @DisplayName("Cooldown por atacante aísla a atacantes distintos de forma independiente")
+    void testIndependentAttackerCooldowns() {
+        tracker.setAttackerCooldown("counter_breath", playerA, 100L, 100L);
+
+        assertFalse(tracker.isReady("counter_breath", playerA, 150L));
+        assertTrue(tracker.isReady("counter_breath", playerB, 150L));
+        assertTrue(tracker.isReady("counter_breath", playerA, 200L));
+    }
+
+    @Test
+    @DisplayName("Cooldown global y por atacante operan sin colisionar")
+    void testGlobalAndAttackerCooldownInterplay() {
+        tracker.setCooldown("counter_breath", 100L, 50L);
+
+        assertFalse(tracker.isReady("counter_breath", 120L));
+        assertTrue(tracker.isReady("counter_breath", 150L));
+
+        tracker.setAttackerCooldown("counter_breath", playerA, 100L, 100L);
+        assertFalse(tracker.isReady("counter_breath", playerA, 160L));
+        assertTrue(tracker.isReady("counter_breath", playerB, 160L));
+        assertTrue(tracker.isReady("counter_breath", playerA, 200L));
+    }
+
+    @Test
+    @DisplayName("Reset borra recargas globales y de atacantes")
+    void testResetClearsAttackerCooldowns() {
+        tracker.setAttackerCooldown("counter_breath", playerA, 100L, 500L);
+        assertFalse(tracker.isReady("counter_breath", playerA, 150L));
+
+        tracker.reset();
+        assertTrue(tracker.isReady("counter_breath", playerA, 150L));
+    }
+
+    @Test
+    @DisplayName("Validación de argumentos nulos en métodos de atacante")
+    void testNullGuards() {
+        assertThrows(NullPointerException.class, () -> tracker.setAttackerCooldown(null, playerA, 100L, 50L));
+        assertThrows(NullPointerException.class, () -> tracker.setAttackerCooldown("ability", null, 100L, 50L));
+        assertThrows(NullPointerException.class, () -> tracker.isReady(null, playerA, 100L));
+        assertTrue(tracker.isReady("ability", (UUID) null, 100L));
     }
 }

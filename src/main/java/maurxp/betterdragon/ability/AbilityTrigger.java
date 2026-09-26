@@ -14,5 +14,17 @@ public enum AbilityTrigger {
     /**
      * Se evalúa periódicamente en los ticks del servidor sujeto a cooldowns lógicos.
      */
-    PERIODIC
+    PERIODIC,
+
+    /**
+     * Se dispara al transicionar a una fase de vuelo nativa de Paper (EnderDragonChangePhaseEvent),
+     * filtrada por la fase configurada en la habilidad (ej. CIRCLING, LAND_ON_PORTAL).
+     */
+    ON_FLIGHT_PHASE,
+
+    /**
+     * Se dispara de forma reactiva al recibir daño el dragón, con evaluación de cooldown
+     * individual por atacante y probabilidad configurable.
+     */
+    ON_DAMAGE
 }

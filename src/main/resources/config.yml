@@ -21,7 +21,7 @@ logging:
   debug: false
 
 # ==============================================================================
-# FASES DE COMBATE Y HABILIDADES (FASE 3.5)
+# FASES DE COMBATE Y HABILIDADES
 # ==============================================================================
 
 # Catálogo declarativo de habilidades disponibles para el dragón
@@ -31,7 +31,7 @@ abilities: {}
 # Definición de dragones y sus fases de combate ordenadas
 dragons:
   default:
-    # Presentación de la BossBar propia de BetterDragon (Fase 3.14 / 3.14-R1)
+    # Presentación de la BossBar propia de BetterDragon
     # Placeholders soportados en title: {dragon_name}, {phase}, {enrage}
     # Semántica de {enrage}: si está presente se sustituye por "&c[ENRAGE]" (activo) o "" (inactivo).
     # Si {enrage} se omite en title, no se añade automáticamente ninguna etiqueta de enrage.
@@ -41,7 +41,7 @@ dragons:
       color: "PURPLE"
       style: "SOLID"
 
-    # Modificador transversal de Soft Enrage (Fase 3.14 / 3.14-R1)
+    # Modificador transversal de Soft Enrage
     # 0.20 (20% HP) y 0.75 (cooldown * 0.75) son candidatos provisionales (TUNING_CANDIDATE)
     # cooldown-multiplier: < 1.0 (cooldown más corto), = 1.0 (sin cambio), > 1.0 (cooldown más largo)
     enrage:
@@ -64,7 +64,7 @@ dragons:
         abilities: []
 
 # ==============================================================================
-# SISTEMA DE RECOMPENSAS (FASE 3.8)
+# SISTEMA DE RECOMPENSAS
 # ==============================================================================
 rewards:
   # Activar o desactivar la asignación y entrega de recompensas tras la victoria

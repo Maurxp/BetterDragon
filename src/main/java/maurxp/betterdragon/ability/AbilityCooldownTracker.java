@@ -19,6 +19,7 @@ import java.util.Objects;
 public class AbilityCooldownTracker {
 
     private final Map<String, Long> nextAvailableTicks = new HashMap<>();
+    private final Map<String, Long> attackerCooldownTicks = new HashMap<>();
 
     /**
      * Verifica si una habilidad se encuentra disponible para ejecutarse en el tick dado.
@@ -31,6 +32,27 @@ public class AbilityCooldownTracker {
         Objects.requireNonNull(abilityId, "abilityId no puede ser nulo");
         Long nextTick = nextAvailableTicks.get(abilityId);
         return nextTick == null || currentTick >= nextTick;
+    }
+
+    /**
+     * Verifica si una habilidad se encuentra disponible tanto a nivel global como específicamente
+     * para el atacante indicado (utilizado en contrataques reactivos CAND-05).
+     *
+     * @param abilityId   identificador de la habilidad
+     * @param attackerId  UUID del atacante (puede ser null)
+     * @param currentTick tick lógico actual
+     * @return true si ni el cooldown global ni el cooldown individual del atacante están activos
+     */
+    public boolean isReady(String abilityId, java.util.UUID attackerId, long currentTick) {
+        if (!isReady(abilityId, currentTick)) {
+            return false;
+        }
+        if (attackerId == null) {
+            return true;
+        }
+        String key = abilityId + ":" + attackerId;
+        Long nextAttackerTick = attackerCooldownTicks.get(key);
+        return nextAttackerTick == null || currentTick >= nextAttackerTick;
     }
 
     /**
@@ -50,6 +72,25 @@ public class AbilityCooldownTracker {
     }
 
     /**
+     * Establece el tick de recarga individual para un atacante específico (CAND-05).
+     *
+     * @param abilityId     identificador de la habilidad
+     * @param attackerId    UUID del atacante
+     * @param currentTick   tick lógico actual
+     * @param cooldownTicks cantidad de ticks de recarga por atacante
+     */
+    public void setAttackerCooldown(String abilityId, java.util.UUID attackerId, long currentTick, long cooldownTicks) {
+        Objects.requireNonNull(abilityId, "abilityId no puede ser nulo");
+        Objects.requireNonNull(attackerId, "attackerId no puede ser nulo");
+        String key = abilityId + ":" + attackerId;
+        if (cooldownTicks <= 0) {
+            attackerCooldownTicks.remove(key);
+        } else {
+            attackerCooldownTicks.put(key, currentTick + cooldownTicks);
+        }
+    }
+
+    /**
      * Obtiene el próximo tick disponible para una habilidad.
      */
     public long getNextAvailableTick(String abilityId) {
@@ -57,9 +98,20 @@ public class AbilityCooldownTracker {
     }
 
     /**
+     * Obtiene el próximo tick disponible para un atacante específico.
+     */
+    public long getNextAvailableTick(String abilityId, java.util.UUID attackerId) {
+        if (attackerId == null) {
+            return getNextAvailableTick(abilityId);
+        }
+        return attackerCooldownTicks.getOrDefault(abilityId + ":" + attackerId, 0L);
+    }
+
+    /**
      * Limpia todas las recargas registradas (utilizado al transicionar de fase).
      */
     public void reset() {
         nextAvailableTicks.clear();
+        attackerCooldownTicks.clear();
     }
 }

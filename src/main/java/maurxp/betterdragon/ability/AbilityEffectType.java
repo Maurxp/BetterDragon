@@ -24,5 +24,20 @@ public enum AbilityEffectType {
     /**
      * Reproduce un sonido en el origen resuelto vía Paper Sound API.
      */
-    SOUND
+    SOUND,
+
+    /**
+     * Genera proyectiles explosivos telegrafiados (TNTPrimed) con daño a bloques suprimido (CAND-03).
+     */
+    CARPET_BOMB,
+
+    /**
+     * Emite un anillo concéntrico expansivo de partículas, empuje y daño radial calibrado (CAND-04).
+     */
+    SHOCKWAVE,
+
+    /**
+     * Invoca esbirros menores marcados inequívocamente con PDC y sujetos a limpieza determinista (CAND-06).
+     */
+    SUMMON
 }

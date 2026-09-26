@@ -223,3 +223,47 @@ Follow-up:          Acción de diseño o implementación derivada
 - **Confidence:** `VERIFIED BY RUNTIME SMOKE TEST / HIGH`
 - **Limitations:**
   Entorno de prueba de servidor headless sin jugadores de red reales conectados físicamente. Valores de `threshold: 0.20` y `cooldown-multiplier: 0.75` permanecen como `TUNING_CANDIDATE` sujetos a playtesting futuro.
+
+---
+
+### EXP-010: Validación Runtime de Habilidades Avanzadas, Telegrafiado Sensorial, Protección de Terreno y Minions (10/10 Checks PASS)
+- **Title:** Validación empírica en servidor Paper 26.1.2 de habilidades avanzadas de combate, telegrafiado sensorial previo, protección de terreno contra explosiones BetterDragon, contrataques reactivos con cooldown individual, invocación y barrido determinista de minions y snapshot isolation.
+- **Objective:** Evaluar en un servidor Paper 26.1.2 real bajo matriz formal de evidencia:
+  1. Inicialización y operatividad de `AbilityEngine` en `BattleSession` (`VERIFIED BY RUNTIME SMOKE TEST`).
+  2. Firma e identificación inequívoca de entidades explosivas (TNT) con PDC (`managed`, `battle_id`, `explosive`) (`VERIFIED BY RUNTIME SMOKE TEST`).
+  3. Supresión selectiva de destrucción de bloques mediante `DragonExplosionListener.onEntityExplode` (`blockList().clear()`) para explosiones BetterDragon (`VERIFIED BY RUNTIME SMOKE TEST` y `VERIFIED BY TEST`).
+  4. Preservación intacta del comportamiento de explosiones externas vanilla sin supresión global (`VERIFIED BY RUNTIME SMOKE TEST` y `VERIFIED BY TEST`).
+  5. Ejecución radial de `ShockwaveEffect` con cálculo de vectores de empuje horizontal/vertical y daño calibrado (`VERIFIED BY RUNTIME SMOKE TEST`).
+  6. Contrataques reactivos `ON_DAMAGE` con tracking de cooldown individual por atacante e independencia entre atacantes (`VERIFIED BY RUNTIME SMOKE TEST` y `VERIFIED BY TEST`).
+  7. Invocación de minions vía `SummonEffect` firmados con las 4 claves obligatorias en PDC (`managed`, `battle_id`, `minion`, `minion_type`) (`VERIFIED BY RUNTIME SMOKE TEST`).
+  8. Limpieza determinista selectiva de minions al finalizar/abortar la sesión con 0% impacto sobre mobs foráneos naturales (`VERIFIED BY RUNTIME SMOKE TEST` y `VERIFIED BY TEST`).
+  9. Modelo inmutable declarativo de telegrafiado sensorial (`TelegraphDefinition`) ejecutado en el hilo principal antes del efecto físico diferido (`VERIFIED BY RUNTIME SMOKE TEST`).
+  10. Cancelación e invalidación de tareas diferidas (`PendingTask`) al abortar la batalla sin efectos fantasma residuales (`VERIFIED BY RUNTIME SMOKE TEST`).
+  11. Aislamiento de snapshot (`Snapshot Isolation`) de batallas activas frente a recargas de configuración `/bd reload` (`VERIFIED BY RUNTIME SMOKE TEST` y `VERIFIED BY TEST`).
+- **Environment:**
+  - Minecraft Java 26.1.2
+  - Paper `paper-26.1.2-74`
+  - Java 25 (OpenJDK Temurin 25.0.4.1+1-LTS)
+  - Pure Paper runtime (sin ProtocolLib, sin Folia, sin plugins externos).
+- **Procedure:**
+  1. Compilar plugin (`mvn clean package -DskipTests`) y desplegar en servidor Paper de pruebas.
+  2. Ejecutar validación automatizada mediante `python validation/test_abilities_integration.py`.
+  3. El servidor ejecuta el hook de validación `bd-test-abilities` que realiza pruebas directas contra entidades del End.
+  4. Verificar que las 10 comprobaciones resulten en `PASS` y el servidor concluya limpiamente.
+- **Evidence Matrix & Observed Results:**
+  - **Check 1 — AbilityEngine Initialized & Active:** `VERIFIED BY RUNTIME SMOKE TEST`. `AbilityEngine` activo en la sesión.
+  - **Check 2 — CarpetBomb TNT PDC Tagging:** `VERIFIED BY RUNTIME SMOKE TEST`. TNT primado firmado con `managed=true`, `battle_id` y `explosive=true`.
+  - **Check 3 — Terrain Protection (blockList Cleared):** `VERIFIED BY RUNTIME SMOKE TEST` y `VERIFIED BY TEST`. Bloques cancelados de la lista de destrucción; daño e interacciones conservados.
+  - **Check 3B — Vanilla Explosion Intact:** `VERIFIED BY RUNTIME SMOKE TEST` y `VERIFIED BY TEST`. Explosiones externas no son interceptadas ni modificadas.
+  - **Check 4 — Shockwave Radial Knockback Execution:** `VERIFIED BY RUNTIME SMOKE TEST`. Ejecución sin errores y cálculo de vectores geométricos dentro de los límites de la arena.
+  - **Check 5 — Reactive Counterattack & Per-Attacker Cooldown:** `VERIFIED BY RUNTIME SMOKE TEST` y `VERIFIED BY TEST`. Atacante 1 entra en cooldown de 100 ticks; atacante 2 mantiene elegibilidad inmediata.
+  - **Check 6 — Minion Summoning 4-Key PDC Tags:** `VERIFIED BY RUNTIME SMOKE TEST`. Minion generado con `managed=true`, `battle_id`, `minion=true` y `minion_type=TEST_MINION`.
+  - **Check 7 — Deterministic Sweep & Zero Impact on Foreign Mobs:** `VERIFIED BY RUNTIME SMOKE TEST` y `VERIFIED BY TEST`. Minions de la sesión removidos; mob externo permanece vivo y válido.
+  - **Check 8 — Sensory Telegraphing Declarative Model:** `VERIFIED BY RUNTIME SMOKE TEST`. Duración (20 ticks), partículas y sonido resueltos en el hilo principal antes de la demora física.
+  - **Check 9 — Lifecycle Task Cancellation on Abort:** `VERIFIED BY RUNTIME SMOKE TEST`. Tarea `BukkitTask` registrada en `BattleSession` cancelada al abortar; cero fugas.
+  - **Check 10 — Snapshot Isolation Across Reload:** `VERIFIED BY RUNTIME SMOKE TEST` y `VERIFIED BY TEST`. `adminAppService.reloadConfiguration()` no altera el snapshot de la batalla activa.
+- **Conclusion:**
+  Todas las mecánicas de combate avanzado, telegrafiado previo, protección de terreno y ciclo de vida de esbirros de la Fase 3.15 operan con 100% determinismo y 0% NMS.
+- **Confidence:** `VERIFIED BY RUNTIME SMOKE TEST / HIGH`
+- **Limitations:**
+  Servidor headless sin clientes gráficos conectados. Los parámetros numéricos de daño, radio, tiempos de telegrafiado y cooldown se catalogan formalmente como `TUNING_CANDIDATE`.

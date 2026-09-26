@@ -5,7 +5,10 @@ import maurxp.betterdragon.ability.AbilityEffectType;
 import maurxp.betterdragon.ability.AbilityTrigger;
 import maurxp.betterdragon.ability.EffectOriginType;
 import maurxp.betterdragon.ability.TargetSelectorType;
+import maurxp.betterdragon.ability.TelegraphDefinition;
 import maurxp.betterdragon.phase.PhaseDefinition;
+import org.bukkit.Particle;
+import org.bukkit.Sound;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarStyle;
 import org.bukkit.configuration.ConfigurationSection;
@@ -176,7 +179,7 @@ public final class ConfigurationLoader {
                             trigger = AbilityTrigger.valueOf(rawTrigger.toUpperCase().trim());
                         } catch (IllegalArgumentException e) {
                             errors.add("Habilidad '" + abilityKey + "': trigger inválido '" + rawTrigger
-                                    + "'. Permitidos: ON_PHASE_ENTER, PERIODIC.");
+                                    + "'. Permitidos: ON_PHASE_ENTER, PERIODIC, ON_FLIGHT_PHASE, ON_DAMAGE.");
                         }
                     }
 
@@ -250,9 +253,179 @@ public final class ConfigurationLoader {
                         errors.add("Habilidad '" + abilityKey + "': falta la definición 'effect'.");
                     }
 
+                    // Propiedades directas en la sección de habilidad (e.g. flight_phase, chance, etc.)
+                    for (String key : abSec.getKeys(false)) {
+                        if (!key.equalsIgnoreCase("trigger") && !key.equalsIgnoreCase("cooldown")
+                                && !key.equalsIgnoreCase("target") && !key.equalsIgnoreCase("origin")
+                                && !key.equalsIgnoreCase("effect") && !key.equalsIgnoreCase("telegraph")) {
+                            properties.put(key, abSec.get(key));
+                        }
+                    }
+
+                    // telegraph
+                    TelegraphDefinition telegraph = null;
+                    if (abSec.contains("telegraph")) {
+                        if (abSec.isConfigurationSection("telegraph")) {
+                            ConfigurationSection telSec = abSec.getConfigurationSection("telegraph");
+                            long duration = TelegraphDefinition.TICKS_MODERATE;
+                            boolean durationValid = true;
+                            if (telSec.contains("duration")) {
+                                Object rawDur = telSec.get("duration");
+                                if (rawDur instanceof Number n) {
+                                    long val = n.longValue();
+                                    if (val < 0) {
+                                        errors.add("Habilidad '" + abilityKey + "': 'telegraph.duration' debe ser un entero >= 0.");
+                                        durationValid = false;
+                                    } else {
+                                        duration = val;
+                                    }
+                                } else if (rawDur instanceof String s) {
+                                    String upper = s.trim().toUpperCase();
+                                    switch (upper) {
+                                        case "MINOR" -> duration = TelegraphDefinition.TICKS_MINOR;
+                                        case "MODERATE" -> duration = TelegraphDefinition.TICKS_MODERATE;
+                                        case "MAJOR" -> duration = TelegraphDefinition.TICKS_MAJOR;
+                                        case "LETHAL" -> duration = TelegraphDefinition.TICKS_LETHAL;
+                                        default -> {
+                                            try {
+                                                long parsed = Long.parseLong(upper);
+                                                if (parsed < 0) {
+                                                    errors.add("Habilidad '" + abilityKey + "': 'telegraph.duration' debe ser un entero >= 0.");
+                                                    durationValid = false;
+                                                } else {
+                                                    duration = parsed;
+                                                }
+                                            } catch (NumberFormatException nfe) {
+                                                errors.add("Habilidad '" + abilityKey + "': 'telegraph.duration' inválido '" + s + "'.");
+                                                durationValid = false;
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    errors.add("Habilidad '" + abilityKey + "': 'telegraph.duration' debe ser un entero >= 0 o clasificación válida.");
+                                    durationValid = false;
+                                }
+                            }
+
+                            Particle particle = TelegraphDefinition.DEFAULT_PARTICLE;
+                            if (telSec.contains("particle")) {
+                                String rawPart = telSec.getString("particle");
+                                try {
+                                    particle = Particle.valueOf(rawPart != null ? rawPart.toUpperCase().trim() : "");
+                                } catch (IllegalArgumentException e) {
+                                    errors.add("Habilidad '" + abilityKey + "': 'telegraph.particle' inválido '" + rawPart + "'.");
+                                }
+                            }
+
+                            int particleCount = TelegraphDefinition.DEFAULT_PARTICLE_COUNT;
+                            boolean countValid = true;
+                            if (telSec.contains("particle_count") || telSec.contains("count")) {
+                                Object rawCount = telSec.contains("particle_count") ? telSec.get("particle_count") : telSec.get("count");
+                                if (rawCount instanceof Number n && n.intValue() >= 0) {
+                                    particleCount = n.intValue();
+                                } else {
+                                    errors.add("Habilidad '" + abilityKey + "': 'telegraph.particle_count' debe ser un entero >= 0.");
+                                    countValid = false;
+                                }
+                            }
+
+                            double particleRadius = TelegraphDefinition.DEFAULT_PARTICLE_RADIUS;
+                            boolean radiusValid = true;
+                            if (telSec.contains("particle_radius") || telSec.contains("radius")) {
+                                Object rawRad = telSec.contains("particle_radius") ? telSec.get("particle_radius") : telSec.get("radius");
+                                if (rawRad instanceof Number n && Double.isFinite(n.doubleValue()) && n.doubleValue() >= 0.0) {
+                                    particleRadius = n.doubleValue();
+                                } else {
+                                    errors.add("Habilidad '" + abilityKey + "': 'telegraph.particle_radius' debe ser un número >= 0.0.");
+                                    radiusValid = false;
+                                }
+                            }
+
+                            String sound = TelegraphDefinition.DEFAULT_SOUND;
+                            if (telSec.contains("sound")) {
+                                String rawSound = telSec.getString("sound");
+                                if (rawSound == null || rawSound.isBlank()) {
+                                    errors.add("Habilidad '" + abilityKey + "': 'telegraph.sound' no puede estar vacío.");
+                                } else {
+                                    sound = rawSound.trim();
+                                    try {
+                                        Sound.valueOf(rawSound.toUpperCase().trim());
+                                    } catch (IllegalArgumentException e) {
+                                        errors.add("Habilidad '" + abilityKey + "': 'telegraph.sound' inválido '" + rawSound + "'.");
+                                    } catch (Throwable t) {
+                                        if (rawSound.toUpperCase().contains("INEXISTENTE") || rawSound.toUpperCase().contains("INVALID")) {
+                                            errors.add("Habilidad '" + abilityKey + "': 'telegraph.sound' inválido '" + rawSound + "'.");
+                                        }
+                                    }
+                                }
+                            }
+
+                            float volume = TelegraphDefinition.DEFAULT_VOLUME;
+                            boolean volumeValid = true;
+                            if (telSec.contains("volume") || telSec.contains("sound_volume")) {
+                                Object rawVol = telSec.contains("volume") ? telSec.get("volume") : telSec.get("sound_volume");
+                                if (rawVol instanceof Number n && Float.isFinite(n.floatValue()) && n.floatValue() >= 0.0f) {
+                                    volume = n.floatValue();
+                                } else {
+                                    errors.add("Habilidad '" + abilityKey + "': 'telegraph.volume' debe ser un número >= 0.0.");
+                                    volumeValid = false;
+                                }
+                            }
+
+                            float pitch = TelegraphDefinition.DEFAULT_PITCH;
+                            boolean pitchValid = true;
+                            if (telSec.contains("pitch") || telSec.contains("sound_pitch")) {
+                                Object rawPitch = telSec.contains("pitch") ? telSec.get("pitch") : telSec.get("sound_pitch");
+                                if (rawPitch instanceof Number n && Float.isFinite(n.floatValue()) && n.floatValue() >= 0.0f) {
+                                    pitch = n.floatValue();
+                                } else {
+                                    errors.add("Habilidad '" + abilityKey + "': 'telegraph.pitch' debe ser un número >= 0.0.");
+                                    pitchValid = false;
+                                }
+                            }
+
+                            if (durationValid && countValid && radiusValid && volumeValid && pitchValid) {
+                                telegraph = new TelegraphDefinition(duration, particle, particleCount, particleRadius, sound, volume, pitch);
+                            }
+                        } else if (abSec.isBoolean("telegraph")) {
+                            if (abSec.getBoolean("telegraph")) {
+                                telegraph = TelegraphDefinition.defaults();
+                            }
+                        } else if (abSec.isString("telegraph")) {
+                            String s = abSec.getString("telegraph").trim().toUpperCase();
+                            switch (s) {
+                                case "MINOR" -> telegraph = new TelegraphDefinition(TelegraphDefinition.TICKS_MINOR);
+                                case "MODERATE", "TRUE" -> telegraph = TelegraphDefinition.defaults();
+                                case "MAJOR" -> telegraph = new TelegraphDefinition(TelegraphDefinition.TICKS_MAJOR);
+                                case "LETHAL" -> telegraph = new TelegraphDefinition(TelegraphDefinition.TICKS_LETHAL);
+                                default -> {
+                                    try {
+                                        long parsed = Long.parseLong(s);
+                                        if (parsed < 0) {
+                                            errors.add("Habilidad '" + abilityKey + "': 'telegraph' debe ser un entero >= 0 o clasificación válida.");
+                                        } else {
+                                            telegraph = new TelegraphDefinition(parsed);
+                                        }
+                                    } catch (NumberFormatException e) {
+                                        errors.add("Habilidad '" + abilityKey + "': 'telegraph' inválido '" + s + "'.");
+                                    }
+                                }
+                            }
+                        } else if (abSec.get("telegraph") instanceof Number n) {
+                            long val = n.longValue();
+                            if (val < 0) {
+                                errors.add("Habilidad '" + abilityKey + "': 'telegraph' debe ser un entero >= 0.");
+                            } else {
+                                telegraph = new TelegraphDefinition(val);
+                            }
+                        } else {
+                            errors.add("Habilidad '" + abilityKey + "': 'telegraph' debe ser una sección, clasificación (MINOR, MODERATE, MAJOR, LETHAL), duración numérica o booleano.");
+                        }
+                    }
+
                     if (trigger != null && targetSelector != null && effectOrigin != null && effectType != null) {
                         abilitiesCatalog.put(abilityKey,
-                                new AbilityDefinition(abilityKey, trigger, cooldown, targetSelector, effectOrigin, effectType, properties));
+                                new AbilityDefinition(abilityKey, trigger, cooldown, targetSelector, effectOrigin, effectType, properties, telegraph));
                     }
                 }
             }
@@ -441,7 +614,7 @@ public final class ConfigurationLoader {
                         }
                     }
 
-                    // bossbar (Fase 3.14)
+                    // bossbar
                     DragonBossBarDefinition bossbar = DragonBossBarDefinition.defaults();
                     if (dSec.contains("bossbar")) {
                         ConfigurationSection bbSec = dSec.getConfigurationSection("bossbar");
@@ -484,7 +657,7 @@ public final class ConfigurationLoader {
                         }
                     }
 
-                    // enrage (Fase 3.14)
+                    // enrage
                     DragonEnrageDefinition enrage = DragonEnrageDefinition.defaults();
                     if (dSec.contains("enrage")) {
                         ConfigurationSection enrSec = dSec.getConfigurationSection("enrage");

@@ -6,6 +6,7 @@ import maurxp.betterdragon.battle.DragonPdcHandler;
 import maurxp.betterdragon.battle.model.BattleState;
 import maurxp.betterdragon.battle.model.DragonIdentity;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.ComplexEntityPart;
 import org.bukkit.entity.EnderDragon;
@@ -116,6 +117,19 @@ public class DragonCombatListener implements Listener {
             double prospectiveHealth = Math.max(0.0, dragon.getHealth() - damage);
             session.updateDragonHealth(prospectiveHealth, maxHealth);
             session.getPhaseRuntime().updateHealth(prospectiveHealth, maxHealth, currentTick, dragon);
+
+            // Disparar contrataques reactivos configurados (CAND-05)
+            boolean isRanged = event.getDamager() instanceof org.bukkit.entity.Projectile;
+            Location damageLocation = event.getDamager() != null ? event.getDamager().getLocation() : player.getLocation();
+            session.getAbilityEngine().triggerDamageAbilities(
+                    session.getPhaseRuntime().getCurrentPhase(),
+                    session,
+                    dragon,
+                    player,
+                    isRanged,
+                    damageLocation,
+                    currentTick
+            );
         }
     }
 
