@@ -1,5 +1,6 @@
 package maurxp.betterdragon.arena;
 
+import maurxp.betterdragon.anticheese.ExplosionPolicyType;
 import org.bukkit.Location;
 
 import java.util.Objects;
@@ -109,5 +110,23 @@ public class ArenaRuleEvaluator {
             return false;
         }
         return isLocationInArena(location) && isEnclosed;
+    }
+
+    /**
+     * Retorna la política de explosiones de la arena evaluada.
+     *
+     * @return tipo de política de explosiones
+     */
+    public ExplosionPolicyType getExplosionPolicy() {
+        return arena.rules().getExplosionPolicy();
+    }
+
+    /**
+     * Indica si el mecanismo de Void Tether está activo para la arena.
+     *
+     * @return true si Void Tether está habilitado
+     */
+    public boolean isVoidTetherEnabled() {
+        return arena.rules().isVoidTetherEnabled();
     }
 }

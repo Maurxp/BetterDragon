@@ -1,5 +1,6 @@
 package maurxp.betterdragon.config;
 
+import maurxp.betterdragon.anticheese.ExplosionPolicyType;
 import maurxp.betterdragon.arena.ArenaBounds;
 import maurxp.betterdragon.arena.ArenaDefinition;
 import maurxp.betterdragon.arena.ArenaRuleSet;
@@ -289,6 +290,32 @@ public final class ArenaConfigurationLoader {
             errors.add("El campo anti-túnel ('" + path + ".anti_tunnel.enabled' o '" + path + ".anti_tunnel_enabled') es obligatorio.");
         }
 
-        return new ArenaRuleSet(waterAllowed, boundaryEnabled, antiTunnelEnabled);
+        ExplosionPolicyType explosionPolicy = ArenaRuleSet.DEFAULT_EXPLOSION_POLICY;
+        if (sec.contains("explosion_policy")) {
+            String epStr = sec.getString("explosion_policy", "").toUpperCase().trim();
+            try {
+                explosionPolicy = ExplosionPolicyType.valueOf(epStr);
+            } catch (IllegalArgumentException e) {
+                errors.add("El campo '" + path + ".explosion_policy' tiene un valor inválido: '" + epStr + "'. Valores permitidos: ALLOW, BLOCK, PROTECT_ARENA");
+            }
+        }
+
+        boolean voidTetherEnabled = ArenaRuleSet.DEFAULT_VOID_TETHER_ENABLED;
+        if (sec.isConfigurationSection("void_tether")) {
+            ConfigurationSection vtSec = sec.getConfigurationSection("void_tether");
+            if (vtSec != null && vtSec.isBoolean("enabled")) {
+                voidTetherEnabled = vtSec.getBoolean("enabled");
+            } else if (vtSec != null && vtSec.contains("enabled")) {
+                errors.add("El campo '" + path + ".void_tether.enabled' debe ser un booleano.");
+            }
+        } else if (sec.isBoolean("void_tether_enabled")) {
+            voidTetherEnabled = sec.getBoolean("void_tether_enabled");
+        } else if (sec.isBoolean("void_tether")) {
+            voidTetherEnabled = sec.getBoolean("void_tether");
+        } else if (sec.contains("void_tether_enabled") || sec.contains("void_tether")) {
+            errors.add("El campo de void tether en '" + path + "' debe ser un booleano.");
+        }
+
+        return new ArenaRuleSet(waterAllowed, boundaryEnabled, antiTunnelEnabled, explosionPolicy, voidTetherEnabled);
     }
 }

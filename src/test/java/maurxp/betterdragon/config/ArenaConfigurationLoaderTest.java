@@ -254,4 +254,62 @@ class ArenaConfigurationLoaderTest {
         assertTrue(ex.getErrors().stream().anyMatch(e -> e.contains("rules")),
                 "Debe exigir explícitamente la sección rules: " + ex.getErrors());
     }
+
+    @Test
+    @DisplayName("Carga de explosion_policy y void_tether válidos e invalidación de valores erróneos")
+    void testExplosionPolicyAndVoidTetherParsing() throws Exception {
+        String yamlWithAntiCheese = """
+                arenas:
+                  default:
+                    world: "world_the_end"
+                    center:
+                      x: 0.0
+                      y: 100.0
+                      z: 0.0
+                    podium:
+                      x: 0.0
+                      y: 65.0
+                      z: 0.0
+                    bounds:
+                      min:
+                        x: -100.0
+                        y: 0.0
+                        z: -100.0
+                      max:
+                        x: 100.0
+                        y: 200.0
+                        z: 100.0
+                    rules:
+                      water_allowed: false
+                      boundary_enabled: true
+                      anti_tunnel_enabled: true
+                      explosion_policy: "BLOCK"
+                      void_tether:
+                        enabled: false
+                """;
+
+        ArenaConfigurationSnapshot snapshot = ArenaConfigurationLoader.load(new StringReader(yamlWithAntiCheese));
+        ArenaDefinition def = snapshot.getArena("default").orElseThrow();
+        assertEquals(maurxp.betterdragon.anticheese.ExplosionPolicyType.BLOCK, def.rules().getExplosionPolicy());
+        assertFalse(def.rules().isVoidTetherEnabled());
+
+        String invalidPolicyYaml = """
+                arenas:
+                  default:
+                    world: "world_the_end"
+                    center: {x: 0.0, y: 100.0, z: 0.0}
+                    podium: {x: 0.0, y: 65.0, z: 0.0}
+                    bounds: {min: {x: -100.0, y: 0.0, z: -100.0}, max: {x: 100.0, y: 200.0, z: 100.0}}
+                    rules:
+                      water_allowed: false
+                      boundary_enabled: true
+                      anti_tunnel_enabled: true
+                      explosion_policy: "INVALID_POLICY"
+                """;
+
+        ConfigValidationException ex = assertThrows(ConfigValidationException.class, () ->
+                ArenaConfigurationLoader.load(new StringReader(invalidPolicyYaml))
+        );
+        assertTrue(ex.getErrors().stream().anyMatch(e -> e.contains("explosion_policy")));
+    }
 }

@@ -23,16 +23,19 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 | **3.3** | **Dragon Lifecycle e Identidad** | Paper API spawning, firma PDC (`managed`, `battle_id`), DragonIdentity, BattleManager, EntityDeathEvent (0 XP vanilla), semántica de chunks y separación de DragonBattle. | `DONE` |
 | **3.3-R1** | **Corrección Quirúrgica Lifecycle** | Eliminación de claves PDC innecesarias (`definition_id`, `schema_version`), resolución estricta de entidad en `DEFERRED_PENDING_CHUNK_LOAD` y restauración de estado lógico previo. | `DONE` |
 | **3.4** | **Combat Runtime** | Registro de participantes, tracking de daño en hilo principal, hitSequence monotónico, historicalName vs lastKnownName, TOP_DAMAGE con desempate determinista, evento BetterDragonDamageEvent, snapshots inmutables. | `DONE` |
-| **3.5** | **Motor de Habilidades y Fases** | Fases ordenadas, progresión monotónica por ratio de salud, AbilityEngine, TargetSelector, LocationResolver, efectos de combate (0% NMS), snapshots tipados, correcciones R1. | `COMPLETE` |
-| **3.6** | **Arena, Reglas y Límites** | Límites geométricos de arena, reglas anti-cheese, separación podium/centro, snapshot inmutable y correcciones R1. | `COMPLETE` |
+| **3.5 / 3.5-R1** | **Motor de Habilidades y Fases** | Fases ordenadas, progresión monotónica por ratio de salud, AbilityEngine, TargetSelector, LocationResolver, efectos de combate (0% NMS), snapshots tipados, correcciones R1. | `COMPLETE` |
+| **3.6 / 3.6-R1** | **Arena, Reglas y Límites** | Límites geométricos de arena, reglas anti-cheese, separación podium/centro, snapshot inmutable y correcciones R1. | `COMPLETE` |
+| **3.7 / 3.7-R1** | **Muerte, Victoria y BattleResult** | Idempotencia de muerte, supresión XP/drops en dragones administrados, encapsulación estricta de BetterDragonVictoryEvent, Slayer TOP_DAMAGE con 2 criterios, 198 tests. | `COMPLETE` |
 | **3.8–3.8-R2** | **Recompensas y Claims** | Hardening final: validación estricta de amount (enteros positivos exactos), Material nativo Paper API (sin heurísticos), Javadocs de idempotencia canónica, 245 tests unitarios. | `COMPLETE` |
-| **3.9–3.9-R2** | **Persistencia SQLite** | Single-Writer Async Worker, almacenamiento durable de claims en SQLite (`betterdragon.db`), versionado v1, restart recovery, protección terminal CLAIMED, no-blocking async, 271 tests. | `COMPLETE` |
+| **3.9 / 3.9-R1 / 3.9-R2** | **Persistencia SQLite** | Single-Writer Async Worker, almacenamiento durable de claims en SQLite (`betterdragon.db`), versionado v1, restart recovery, protección terminal CLAIMED, no-blocking async, 271 tests. | `COMPLETE` |
 | **3.10** | **Sistema de Leaderboard** | Leaderboard persistente, SQLite schema v2, migración v1 → v2, historial de batallas y participación, estadísticas por UUID, rankings deterministas, transacciones atómicas, idempotencia, BattleResult, persistencia async, 289 tests. | `COMPLETE` |
 | **3.11–3.11-R1** | **Commands / Admin UX** | Arquitectura Application Layer compartida (preparada para futuras GUIs), `/betterdragon` y alias `/bd`, CommandRegistry, permisos granulares, console safety, subcomandos, hardening de hilo en /bd claim con MainThreadDispatcher, 314 tests. | `COMPLETE` |
-| **3.12** | **Investigación & Formalización** | Investigación de estado del arte (Paper 26.1.2-74), formalización de decisiones de diseño y catálogo de perfiles. | `COMPLETE` |
-| **3.13** | **Perfiles, Atributos & Scaling** | Catálogo múltiple de perfiles (`DragonCatalog`), atributos (`DragonAttributes`), scaling lineal por jugadores (`DragonScalingCalculator`), snapshot de batalla (`BattleConfigurationSnapshot`), selección en `/bd start`, persistencia PDC extendida. | `COMPLETE` |
-| **3.13-R1** | **Consolidación, Corrección & Cierre** | Corrección de `bd-test-lifecycle`, restauración de invariantes en `DragonDefinition`, semántica Opción A en scaling (`enabled: true` sin modo = `LINEAR`), tuning candidates documentados, eliminación de `catch (Throwable)`, validación `definition_id` en sesión, verificación schema v1, 372 tests. | `COMPLETE` |
-| **3.15–3.15-R2** | **Advanced Combat Abilities & Sensory Telegraphs (Refinement & Production Hardening)** | Bombardeo aéreo de TNT (`CARPET_BOMB`), Onda expansiva de aterrizaje (`SHOCKWAVE`), Contrataques reactivos con cooldown individual (`ON_DAMAGE`), Invocación de minions (`SUMMON`) con 4 firmas PDC y limpieza determinista, Telegrafiado sensorial previo declarativo (`TelegraphDefinition`), Protección de terreno en explosiones BetterDragon (`blockList().clear()`), Snapshot isolation total, refactorización semántica de tests, purga integral de test hooks en `BetterDragonPlugin.java` (-1115 líneas de test residue, 420 líneas de composition root puro), 0% NMS, 447 tests unitarios/integración (0 fallos, 0 errores), empaquetado de producción limpio. | `COMPLETE` |
+| **3.12 / 3.12-R1** | **Investigación & Formalización** | Investigación de estado del arte (Paper 26.1.2-74), formalización de decisiones de diseño y catálogo de perfiles. | `COMPLETE` |
+| **3.13 / 3.13-R1** | **Perfiles, Atributos & Scaling** | Catálogo múltiple de perfiles (`DragonCatalog`), atributos (`DragonAttributes`), scaling lineal por jugadores (`DragonScalingCalculator`), snapshot de batalla (`BattleConfigurationSnapshot`), selección en `/bd start`, persistencia PDC extendida. | `COMPLETE` |
+| **3.14 / 3.14-R1** | **Encounter Presentation & Soft Enrage** | BossBar propia independiente en Bukkit/Paper API con supresión vanilla preservada, cálculo seguro de progreso [0.0, 1.0], semántica explícita `{enrage}`, feedback sonoro de transiciones, modificador transversal Soft Enrage monotónico false -> true, escalado de cooldowns en AbilityEngine sin mutar definiciones, snapshot isolation y hardening. | `COMPLETE` |
+| **3.15 / 3.15-R1 / 3.15-R2 / 3.15-R3** | **Advanced Combat Abilities & Production Hardening** | Bombardeo aéreo de TNT (`CARPET_BOMB`), Onda expansiva de aterrizaje (`SHOCKWAVE`), Contrataques reactivos con cooldown individual (`ON_DAMAGE`), Invocación de minions (`SUMMON`) con 4 firmas PDC y limpieza determinista, Telegrafiado sensorial previo declarativo (`TelegraphDefinition`), Protección de terreno en explosiones BetterDragon, Snapshot isolation total, purga integral de test hooks en `BetterDragonPlugin.java` (-1115 líneas de test residue), 447 tests unitarios/integración, empaquetado de producción limpio. | `COMPLETE` |
+| **3.16** | **Anti-Cheese Gameplay & Arena Control** | Política centralizada de explosiones (`ExplosionPolicy` [ALLOW, BLOCK, PROTECT_ARENA]) contra camas y anclas de respawn, control de agua (`WaterPolicy`), control perimetral (`BoundaryPolicy` [INSIDE, NEAR_BOUNDARY, OUTSIDE]), sistema de retorno seguro `Void Tether` (4 niveles prioritarios, rescate de vacío, debounce 1s, aislamiento de batallas), 485 tests automatizados (0 fallos, 0 errores), 0% NMS. | `COMPLETE` |
+| **3.16-R1** | **Hardening Anti-Cheese & Documentación** | Hardening integral de ExplosionPolicy (PDC check para BETTERDRAGON_ABILITY en BLOCK, exención de EnderCrystal), preservación de orientación yaw/pitch en retorno seguro, cálculo de fallback Tier 4 referenciado al centro de arena, clamping seguro con inset proporcional, limpieza determinista de VoidTetherService en victoria, suite anti-regresión documental, 499 tests unitarios e integrados (0 fallos, 0 errores). | `COMPLETE` |
 
 ---
 
@@ -524,3 +527,74 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
   - Cobertura total de los subsistemas de ciclo de vida, combate, fases, arenas, victoria, recompensas, leaderboard, presentación, bossbars, y habilidades avanzadas con telegrafiado sensorial.
 - **Empaquetado de Producción:**
   - Artefacto sombreado (`shaded JAR`) libre de clases de test, harnesses de laboratorio o scripts externos.
+
+---
+
+## 14. Estado de la Fase 3.16 (Anti-Cheese Gameplay & Arena Control) — `COMPLETE`
+
+- **Política Centralizada de Explosiones (`maurxp.betterdragon.anticheese.ExplosionPolicy`):**
+  - `ExplosionPolicyType`: Enum inmutable (`ALLOW`, `BLOCK`, `PROTECT_ARENA`).
+  - `ExplosionSourceType`: Clasificación tipada (`BED`, `RESPAWN_ANCHOR`, `BETTERDRAGON_ABILITY`, `OTHER`).
+  - `ExplosionDecision`: Record desacoplado que separa las consecuencias de diseño:
+    - `shouldExplode()`: Determina si la detonación física es permitida o cancelada proactivamente en interacción.
+    - `allowBlockDamage()`: Controla si la detonación puede alterar o destruir bloques.
+    - `allowPlayerDamage()`: Permite o deniega el daño resultante hacia los jugadores participantes.
+    - `allowDragonDamage()`: Permite o mitiga el daño por explosiones de bloques contra el Ender Dragon.
+  - Modos de Operación:
+    - `BLOCK`: Cancela proactivamente el `PlayerInteractEvent` con camas y anclas de respawn en la arena.
+    - `PROTECT_ARENA`: Permite la detonación pero vacía el 100% de `blockList()` en `BlockExplodeEvent` (protección de terreno) y cancela el daño de bloques contra el dragón en `EntityDamageByBlockEvent`.
+    - `ALLOW`: Comportamiento estándar sin supresión anti-cheese.
+  - Cero interferencia fuera de la arena o sin batalla activa. Las habilidades de BetterDragon (`BETTERDRAGON_ABILITY`) son respetadas y delegadas a su listener dedicado.
+- **Control Estricto de Agua (`maurxp.betterdragon.anticheese.WaterPolicy`):**
+  - `WaterDecision`: Enum (`ALLOW`, `DENY`).
+  - Intercepta el vaciado de cubos de agua (`PlayerBucketEmptyEvent`), la colocación de bloques contenedores de agua (`BlockPlaceEvent`), la dispensación de fluidos (`BlockDispenseEvent`) y la propagación de corrientes hacia la arena (`BlockFromToEvent`).
+  - Confinado exclusivamente al volumen geométrico `ArenaBounds` durante el estado `ACTIVE` de la sesión.
+- **Control Geométrico de Perímetro (`maurxp.betterdragon.anticheese.BoundaryPolicy`):**
+  - Utiliza `ArenaBounds` existente sin crear geometrías paralelas ni buffers incompatibles.
+  - `BoundaryZone`: `INSIDE` (interior seguro), `NEAR_BOUNDARY` (distancia al borde $\le 5.0$ bloques), `OUTSIDE` (exterior de la arena).
+  - `BoundaryTransition`: Rastreo de transiciones de movimiento (`INSIDE_TO_INSIDE`, `INSIDE_TO_NEAR`, `NEAR_TO_OUTSIDE`, `OUTSIDE_TO_OUTSIDE`, etc.).
+  - Clamping Inward Seguro: `clampInside(Location, margin)` retiene matemáticamente las coordenadas del jugador dentro del volumen cerrado.
+- **Sistema Void Tether y Estrategia de Retorno Seguro (`maurxp.betterdragon.anticheese.VoidTetherService`):**
+  - Rescate contra escape y caída al vacío (`DamageCause.VOID` con elevación $y \le 0$).
+  - Restringido exclusivamente a **participantes registrados** en la `BattleSession` activa. Espectadores o jugadores ajenos en el mundo no son afectados.
+  - `SafeReturnLocationStrategy` con resolución jerárquica en 4 niveles prioritarios:
+    1. **Tier 1:** Última posición válida conocida dentro de la arena (`lastKnownValidLocation`).
+    2. **Tier 2:** Podio de la arena (`arena.podiumCenter()`).
+    3. **Tier 3:** Centro geométrico de la arena (`arena.center()`).
+    4. **Tier 4:** Fallback clamped garantizado dentro de `ArenaBounds`.
+  - Validación física y espacial estricta: mundo cargado, chunk cargado, despeje vertical libre de vacío ($y > 0$), y espacio transitable libre de lava o fuego.
+  - Prevención de bucles y spam de teleportación: Debounce temporal de 1000ms por UUID de participante.
+  - Limpieza de estado determinista: Al desconectarse (`PlayerQuitEvent`), cambiar de mundo (`PlayerChangedWorldEvent`) o concluir/abortar la batalla.
+- **Configuración y Snapshots (`maurxp.betterdragon.config` & `arenas.yml`):**
+  - Extensión de `ArenaRuleSet` con `explosionPolicy` (default `PROTECT_ARENA`) y `voidTetherEnabled` (default `true`).
+  - Constructor sobrecargado en `ArenaRuleSet` preservando 100% de compatibilidad hacia atrás.
+  - Configuración declarativa en `arenas.yml` con validación fail-safe en `ArenaConfigurationLoader`.
+- **Calidad, Pruebas y Empaquetado:**
+  - 485 tests unitarios e integrados automatizados ejecutados en Maven (`BUILD SUCCESS`, 0 fallos, 0 errores, 0 omitidos).
+  - 36 tests específicos dedicados a `ExplosionPolicyTest`, `WaterPolicyTest`, `BoundaryPolicyTest`, `SafeReturnLocationStrategyTest`, `VoidTetherServiceTest`, y `AntiCheeseIntegrationTest`.
+  - Dominio y control de combate al **0% NMS** usando exclusivamente Bukkit/Paper API en el hilo principal.
+  - Shaded JAR de producción limpio sin código de pruebas, scripts Python ni harnesses.
+
+---
+
+## 15. Estado de la Fase 3.16-R1 (Hardening de Anti-Cheese, Consistencia Documental y Validación de Producción) — `COMPLETE`
+
+- **Auditoría Exhaustiva y Hardening de Explosiones (`maurxp.betterdragon.anticheese.AntiCheeseExplosionListener`):**
+  - Identificación tipada y precisa de explosiones producidas por habilidades propias de BetterDragon (`BETTERDRAGON_ABILITY`) mediante inspección de PDC (`betterdragon:managed`, `betterdragon:explosive`).
+  - En modo `ExplosionPolicyType.BLOCK`: los proyectiles TNT lanzados por BetterDragon (`CARPET_BOMB`) se excluyen de la cancelación indebida de detonación, permitiendo su impacto físico mientras el terreno se mantiene 100% protegido.
+  - En `EntityDamageByBlockEvent` y `EntityDamageByEntityEvent`: los cristales de End (`EnderCrystal`) se excluyen estrictamente de la supresión de daño contra el dragón, preservando la mecánica canónica y legítima de destrucción de cristales documentada en la Especificación Maestra de Jugabilidad (`docs/GAMEPLAY_DESIGN.md`).
+  - Neutralidad absoluta fuera de arena activa o en ausencia de sesión: cero interferencia con explosiones del servidor o el mundo global.
+- **Auditoría y Robustez de Límites (`maurxp.betterdragon.anticheese.BoundaryPolicy` & `SafeReturnLocationStrategy`):**
+  - **Preservación Estricta de Orientación:** `SafeReturnLocationStrategy` preserva el `yaw` y `pitch` originales del jugador al teletransportar, eliminando cambios bruscos de ángulo visual que desorientaban al usuario.
+  - **Cálculo de Fallback Tier 4 Desacoplado:** El cálculo de fallback hacia el interior se ancla en `session.getArena().center()`, garantizando comportamiento matemáticamente exacto para arenas ubicadas en cualquier coordenada del mundo (eliminando asunciones implícitas de origen en `0, 0`).
+  - **Clamping Seguro Proporcional:** `BoundaryPolicy.clampInside()` y `SafeReturnLocationStrategy` calculan un inset efectivo proporcional a la dimensión de la arena (`Math.min(safeInset, (max - min) / 4.0)`), evitando inversión de cotas en arenas o pasillos estrechos.
+  - Inclusión de `Material.WITHER_ROSE` en la detección de peligros en `isHazardous()`.
+- **Limpieza Determinista de Ciclo de Vida en `VoidTetherService`:**
+  - Registro de listener para `BetterDragonVictoryEvent` en `AntiCheeseBoundaryListener`: invoca `voidTetherService.onBattleEnd(event.getBattleId())` inmediatamente al consumarse la victoria.
+  - Garantiza la purga total de los timestamps de debounce (`lastTetherTimestamp`) y referencias persistentes tanto en finalización ordinaria, victoria (`BetterDragonVictoryEvent`) como en cancelación forzada (`abort()`).
+- **Protección contra Regresiones Documentales (`maurxp.betterdragon.docs`):**
+  - Creación de la suite automatizada de pruebas `DocumentationHistoryTest`.
+  - Verificación formal de que `README.md` y `docs/IMPLEMENTATION.md` preservan todas las fases históricas obligatorias (`3.0` a `3.16-R1`) y mantienen una separación explícita entre Estado Actual, Historial de Fases y Roadmap Futuro.
+- **Calidad, Pruebas y Validación:**
+  - 499 tests unitarios e integrados automatizados ejecutados en Maven (`BUILD SUCCESS`, 0 fallos, 0 errores, 0 omitidos).
+  - Verificación de empaquetado de producción sombreado limpio, sin residuos de pruebas ni harnesses.

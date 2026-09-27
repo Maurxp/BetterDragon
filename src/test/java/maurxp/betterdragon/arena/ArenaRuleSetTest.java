@@ -52,4 +52,22 @@ class ArenaRuleSetTest {
         assertFalse(tunnelOnly.isBoundaryEnabled());
         assertTrue(tunnelOnly.isAntiTunnelEnabled());
     }
+
+    @Test
+    @DisplayName("ExplosionPolicy y VoidTether son configurables con defaults seguros")
+    void testExplosionPolicyAndVoidTether() {
+        ArenaRuleSet def = ArenaRuleSet.defaults();
+        assertEquals(maurxp.betterdragon.anticheese.ExplosionPolicyType.PROTECT_ARENA, def.getExplosionPolicy());
+        assertTrue(def.isVoidTetherEnabled());
+
+        ArenaRuleSet custom = new ArenaRuleSet(
+                true,
+                true,
+                true,
+                maurxp.betterdragon.anticheese.ExplosionPolicyType.BLOCK,
+                false
+        );
+        assertEquals(maurxp.betterdragon.anticheese.ExplosionPolicyType.BLOCK, custom.getExplosionPolicy());
+        assertFalse(custom.isVoidTetherEnabled());
+    }
 }

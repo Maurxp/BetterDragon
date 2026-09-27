@@ -45,3 +45,13 @@ arenas:
       # Regla de anti-túnel
       anti_tunnel:
         enabled: true
+
+      # Política de explosiones anti-cheese (ALLOW, BLOCK, PROTECT_ARENA)
+      # PROTECT_ARENA: la explosión detona afectando a jugadores, pero no rompe terreno ni daña al dragón
+      # BLOCK: neutraliza y cancela proactivamente la detonación de camas y anclas de respawn
+      # ALLOW: comportamiento vanilla sin restricciones
+      explosion_policy: "PROTECT_ARENA"
+
+      # Mecanismo de contención perimetral y recuperación contra el vacío (Void Tether)
+      void_tether:
+        enabled: true

@@ -934,3 +934,56 @@ Todo dragón generado por BetterDragon porta síncronamente 4 claves en su `Pers
 
 ### 16.9 Cero NMS:
 - Todo el subsistema de combate, listeners, telegrafiado y explosiones opera con **0% NMS** sobre la API de Paper 26.1.2-74 y Java 25.
+
+---
+
+## 17. Subsistema Anti-Cheese, Control de Perímetro y Void Tether (Fase 3.16 / 3.16-R1)
+
+### 17.1 Topología y Componentes (`maurxp.betterdragon.anticheese`):
+```
+[ArenaRuleSet] (explosionPolicy, waterAllowed, boundaryEnabled, voidTetherEnabled)
+      │
+      ├──► [ExplosionPolicy] ──► [ExplosionDecision] (allowBlockDamage, allowDragonDamage, etc.)
+      │          ▲
+      │          └── [AntiCheeseExplosionListener] (PlayerInteract, BlockExplode, EntityDamage)
+      │
+      ├──► [WaterPolicy] ──► [WaterDecision] (ALLOW, DENY)
+      │          ▲
+      │          └── [AntiCheeseWaterListener] (BucketEmpty, BlockPlace, Dispense, Flow)
+      │
+      └──► [BoundaryPolicy] ──► [BoundaryZone] (INSIDE, NEAR, OUTSIDE) & [BoundaryTransition]
+                 ▲
+                 └── [VoidTetherService] ──► [SafeReturnLocationStrategy] (Tier 1 -> Tier 4)
+                           ▲
+                           └── [AntiCheeseBoundaryListener] (Move, DamageCause.VOID, Quit, WorldChange, Victory)
+```
+
+### 17.2 Política de Explosiones (`ExplosionPolicy`):
+- **Desacoplamiento Decisional:** Separa la detonación (`shouldExplode()`), destrucción de terreno (`allowBlockDamage()`), daño a jugadores (`allowPlayerDamage()`) y daño al dragón (`allowDragonDamage()`).
+- **Modos Formales:**
+  - `ALLOW`: Sin supresión.
+  - `BLOCK`: Cancela la interacción de colocación/detonación de camas y anclas de respawn en la arena.
+  - `PROTECT_ARENA`: Permite la detonación pero neutraliza el 100% de `blockList()` y cancela el daño de bloques contra el dragón.
+- **Identificación PDC y Habilidades Propias:**
+  - Las entidades con firma PDC `betterdragon:managed` y `betterdragon:explosive` (`CARPET_BOMB`) se clasifican como `BETTERDRAGON_ABILITY` y no se cancelan en modo `BLOCK`, manteniendo el impacto físico y terreno protegido.
+  - Las explosiones legítimas de cristales de End (`EnderCrystal`) se excluyen estrictamente de la supresión de daño contra el dragón, garantizando la mecánica canónica vanilla.
+
+### 17.3 Política de Agua (`WaterPolicy`):
+- Intercepta `PlayerBucketEmptyEvent`, `BlockPlaceEvent`, `BlockDispenseEvent` y `BlockFromToEvent`.
+- Confinada estrictamente a la jurisdicción de la arena activa (`isInArena(location)`) durante el estado `ACTIVE`. Cero impacto en el resto del mundo o servidor.
+
+### 17.4 Control de Perímetro y Void Tether (`BoundaryPolicy` & `VoidTetherService`):
+- **Autoridad Geométrica Única:** `ArenaBounds` es la autoridad canónica sin duplicación de geometrías.
+- **Aislamiento de Participantes:** Confinado estrictamente a jugadores registrados en la `BattleSession`. Espectadores y externos no son afectados.
+- **Estrategia Jerárquica de Retorno Seguro (`SafeReturnLocationStrategy`):**
+  - **Tier 1:** Última posición válida conocida (`lastKnownValidLocation`).
+  - **Tier 2:** Podio central de la arena (`arena.podiumCenter()`).
+  - **Tier 3:** Centro geométrico de la arena (`arena.center()`).
+  - **Tier 4:** Fallback clamped garantizado dentro de `ArenaBounds`.
+- **Invariantes Físicas:**
+  - Preservación de orientación (`yaw` y `pitch`) para evitar desorientación visual.
+  - Comprobación estricta de mundo disponible, chunk cargado (sin forzar cargas agresivas), despeje vertical ($y > 0$), y ausencia de lava, fuego y wither roses.
+  - Inward clamping seguro con margen proporcional ante arenas estrechas.
+- **Debounce y Limpieza de Ciclo de Vida:**
+  - Debounce de 1000ms por UUID para evitar bucles de teleport.
+  - Limpieza determinista inmediata en `PlayerQuitEvent`, `PlayerChangedWorldEvent`, `BetterDragonVictoryEvent`, finalización de batalla y cancelación forzada (`abort()`). Cero fugas de memoria.

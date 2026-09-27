@@ -1,5 +1,13 @@
 package maurxp.betterdragon;
 
+import maurxp.betterdragon.anticheese.AntiCheeseBoundaryListener;
+import maurxp.betterdragon.anticheese.AntiCheeseExplosionListener;
+import maurxp.betterdragon.anticheese.AntiCheeseWaterListener;
+import maurxp.betterdragon.anticheese.BoundaryPolicy;
+import maurxp.betterdragon.anticheese.ExplosionPolicy;
+import maurxp.betterdragon.anticheese.SafeReturnLocationStrategy;
+import maurxp.betterdragon.anticheese.VoidTetherService;
+import maurxp.betterdragon.anticheese.WaterPolicy;
 import maurxp.betterdragon.application.admin.AdminApplicationService;
 import maurxp.betterdragon.application.arena.ArenaQueryService;
 import maurxp.betterdragon.application.battle.BattleAdminService;
@@ -86,6 +94,7 @@ public final class BetterDragonPlugin extends JavaPlugin {
     private RewardApplicationService rewardAppService;
     private CommandRegistry commandRegistry;
     private BetterDragonCommand betterDragonCommand;
+    private VoidTetherService voidTetherService;
 
     @Override
     public void onEnable() {
@@ -143,6 +152,22 @@ public final class BetterDragonPlugin extends JavaPlugin {
             getServer().getPluginManager().registerEvents(flightListener, this);
             DragonExplosionListener explosionListener = new DragonExplosionListener();
             getServer().getPluginManager().registerEvents(explosionListener, this);
+
+            // 7c. Inicializar subsistema de Anti-Cheese y Control de Arena
+            ExplosionPolicy explosionPolicy = new ExplosionPolicy();
+            WaterPolicy waterPolicy = new WaterPolicy();
+            BoundaryPolicy boundaryPolicy = new BoundaryPolicy();
+            SafeReturnLocationStrategy safeReturnStrategy = new SafeReturnLocationStrategy();
+            this.voidTetherService = new VoidTetherService(sessionManager, boundaryPolicy, safeReturnStrategy);
+
+            AntiCheeseExplosionListener antiCheeseExplosionListener = new AntiCheeseExplosionListener(sessionManager, explosionPolicy);
+            getServer().getPluginManager().registerEvents(antiCheeseExplosionListener, this);
+
+            AntiCheeseWaterListener antiCheeseWaterListener = new AntiCheeseWaterListener(sessionManager, waterPolicy);
+            getServer().getPluginManager().registerEvents(antiCheeseWaterListener, this);
+
+            AntiCheeseBoundaryListener antiCheeseBoundaryListener = new AntiCheeseBoundaryListener(voidTetherService);
+            getServer().getPluginManager().registerEvents(antiCheeseBoundaryListener, this);
 
             // 8. Inicializar subsistema de Recompensas y Persistencia Durable
             this.databaseManager = DatabaseManager.forPluginDataFolder(getDataFolder(), getLogger());
@@ -257,6 +282,11 @@ public final class BetterDragonPlugin extends JavaPlugin {
                     }
                 }
             }
+        }
+
+        // Limpieza de Void Tether
+        if (voidTetherService != null) {
+            voidTetherService.onBattleEnd(null);
         }
 
         // Desregistrar comando si fue registrado
@@ -415,6 +445,10 @@ public final class BetterDragonPlugin extends JavaPlugin {
 
     public BetterDragonCommand getBetterDragonCommand() {
         return betterDragonCommand;
+    }
+
+    public VoidTetherService getVoidTetherService() {
+        return voidTetherService;
     }
 
 }
