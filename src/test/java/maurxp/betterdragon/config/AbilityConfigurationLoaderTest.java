@@ -6,8 +6,6 @@ import maurxp.betterdragon.ability.AbilityTrigger;
 import maurxp.betterdragon.ability.TelegraphDefinition;
 import maurxp.betterdragon.arena.ArenaDefinition;
 import org.bukkit.Particle;
-import org.bukkit.Sound;
-import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;

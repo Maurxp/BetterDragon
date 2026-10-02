@@ -14,8 +14,8 @@
 
 ## Estado Actual del Proyecto
 - **Versión:** `0.1.0-SNAPSHOT`
-- **Fase Actual:** Fase 3.16-R1 — Hardening de Anti-Cheese, Consistencia Documental y Validación de Producción `[DONE]`
-- **Métricas del Sistema:** 499 tests unitarios e integrados pasando (0 fallos, 0 errores, 0 omitidos), 0% NMS en dominio, combate y control de arena, artefacto de producción limpio y sombreado.
+- **Fase Actual:** Fase 3.17-R0 — Auditoría de Calidad, Deuda Técnica, Completitud Funcional y Preparación para Pruebas In-Game `[DONE]`
+- **Métricas del Sistema:** 499 tests unitarios e integrados pasando (0 fallos, 0 errores, 0 omitidos), 0 warnings en código principal y de pruebas (`javac` release 25), 0% NMS en dominio, combate y control de arena, artefacto de producción limpio y sombreado.
 
 ---
 
@@ -53,12 +53,16 @@
 - **Fase 3.15-R2:** Purga Integral de Test Hooks `[DONE]`
 - **Fase 3.15-R3:** Advanced Combat Abilities, Sensory Telegraphs & Production Hardening (Bombardeo aéreo de TNT durante vuelo/circling, onda expansiva en aterrizaje al podio, contrataques reactivos con cooldown individual por atacante, invocación de esbirros con firma PDC de 4 claves y sweep determinista, telegrafiado sensorial previo a impactos sobre el hilo principal Bukkit, protección selectiva de bloques contra explosiones BetterDragon, snapshot isolation absoluto ante `/bd reload`, refactorización semántica permanente, purga total de test hooks en producción [-1115 líneas de test residue en BetterDragonPlugin], 447 tests unitarios e integrados [0 fallos, 0 errores], empaquetado limpio sin código de pruebas, validación EXP-010: 10/10 checks PASS) `[DONE]`
 - **Fase 3.16:** Anti-Cheese Gameplay & Arena Control (Política centralizada de explosiones `ExplosionPolicy` [`ALLOW`, `BLOCK`, `PROTECT_ARENA`] para camas y anclas de respawn con protección de terreno y mitigación de daño al dragón; control estricto de agua `WaterPolicy` con denegación de cubos, colocación y propagación de fluidos en arena activa; control de perímetro `BoundaryPolicy` con zonas [`INSIDE`, `NEAR_BOUNDARY`, `OUTSIDE`], detección de transiciones y sujeción interior; sistema `Void Tether` con rescate de caída al vacío [`DamageCause.VOID`] y escape de arena confinado exclusivamente a participantes activos, estrategia de retorno seguro priorizada en 4 niveles [última posición válida -> podio -> centro -> clamp seguro], prevención de bucles por debounce de 1s, limpieza determinista ante desconexión o cambio de mundo, cero interferencia fuera de batallas, 485 tests unitarios e integrados [0 fallos, 0 errores], empaquetado limpio sin dependencias de prueba) `[DONE]`
-
-### Fase Actual (Current Phase)
 - **Fase 3.16-R1:** Hardening de Anti-Cheese, Consistencia Documental y Validación de Producción (Auditoría profunda del subsistema anti-cheese; protección de proyectiles TNT de BetterDragon en modo BLOCK; exclusión de EnderCrystal de mitigación indebida de daño de explosión contra el dragón según especificación de diseño; preservación estricta de orientación del jugador [yaw/pitch] en SafeReturnLocationStrategy sin desorientación visual; cálculo de fallback Tier 4 referenciado al centro de la arena en coordenadas arbitrarias con búsqueda acotada de seguridad física; clamping interior seguro con cálculo de inset proporcional ante arenas estrechas; verificación estricta de peligros [Wither Rose, lava, fuego]; contrato PDC unificado para habilidades BetterDragon; limpieza determinista de VoidTetherService en BetterDragonVictoryEvent para eliminación completa de retención en memoria; suite automatizada de anti-regresión documental; 499 tests unitarios e integrados [0 fallos, 0 errores, 0 omitidos]; empaquetado de producción sombreado limpio) `[DONE]`
 
+- **Fase 3.17-R0 / 3.17-R1:** Auditoría de Calidad, Deuda Técnica, Saneamiento de Warnings y Preparación para Pruebas In-Game (Auditoría exhaustiva de 23 dimensiones del producto; análisis y resolución técnica de deprecación en Sound API de Paper 26.1.2-74 / Java 25; encapsulación segura de `Damageable.getMaxHealth()`; depuración de imports y campos muertos; aislamiento de suppressions en métodos privados dedicados; saneamiento de test harness en DragonExplosionListenerTest; verificación de ausencia de GUIs y validación de la Capa de Aplicación como base para futuros menús de cofres; matriz de completitud de features; evaluación del flujo end-to-end de 17 pasos; confirmación de aptitud de despliegue in-game; 499 tests unitarios e integrados [0 fallos, 0 errores, 0 omitidos]; registro técnico consolidado en `docs/IMPLEMENTATION.md`) `[DONE]`
+
 ### Hoja de Ruta Futura (Future Roadmap)
-- **Fase 3.17:** Arena Restoration, Polish & Final Release `[TODO]`
+- **Fase 3.18:** Moveset Presets & Config Hardening (Presets listos para jugar en `config.yml`) `[TODO]`
+- **Fase 3.19:** Vanilla Crystal Placement Trigger (Invocación automática por ritual de 4 cristales) `[TODO]`
+- **Fase 3.20:** Arena Restoration Engine (Restauración de cristales, torres de obsidiana y terreno) `[TODO]`
+- **Fase 3.21:** Interactive Chest Menu GUI (Panel administrativo y buzón de reclamos gráfico) `[TODO]`
+- **Fase 3.22:** In-Game Acceptance & Release Candidate (Validación multijugador real y RC) `[TODO]`
 
 ---
 

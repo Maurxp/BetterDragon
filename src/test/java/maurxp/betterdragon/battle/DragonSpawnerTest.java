@@ -165,7 +165,9 @@ class DragonSpawnerTest {
                     if (method.getName().equals("getEnvironment")) return World.Environment.THE_END;
                     if (method.getName().equals("getChunkAt") || method.getName().equals("getChunk")) return fakeChunk;
                     if (method.getName().equals("spawn") && args.length == 3) {
-                        return spawnFunc.spawn((Location) args[0], (Class<?>) args[1], (Consumer<EnderDragon>) args[2]);
+                        @SuppressWarnings("unchecked")
+                        Consumer<EnderDragon> consumer = (Consumer<EnderDragon>) args[2];
+                        return spawnFunc.spawn((Location) args[0], (Class<?>) args[1], consumer);
                     }
                     return null;
                 }

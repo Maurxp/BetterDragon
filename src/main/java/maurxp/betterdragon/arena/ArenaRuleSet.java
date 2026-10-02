@@ -2,8 +2,6 @@ package maurxp.betterdragon.arena;
 
 import maurxp.betterdragon.anticheese.ExplosionPolicyType;
 
-import java.util.Objects;
-
 /**
  * Conjunto inmutable de reglas geométricas, ambientales y anti-cheese aplicables a una arena.
  * <p>

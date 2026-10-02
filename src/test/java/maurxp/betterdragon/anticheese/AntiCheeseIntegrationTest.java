@@ -45,7 +45,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -226,7 +225,7 @@ class AntiCheeseIntegrationTest {
         );
 
         explosionListener.onPlayerInteract(event);
-        assertTrue(event.useInteractedBlock() == org.bukkit.event.Event.Result.DENY || event.isCancelled(),
+        assertTrue(event.useInteractedBlock() == org.bukkit.event.Event.Result.DENY,
                 "En modo BLOCK, la interacción con la cama debe cancelarse");
     }
 
@@ -330,6 +329,8 @@ class AntiCheeseIntegrationTest {
                     return null;
                 }
         );
+
+        assertSame(fakeDragon, part.getParent());
 
         // Listener resuelve el padre
         ExplosionDecision decision = explosionPolicy.evaluate(ExplosionSourceType.BED, fakeDragon.getLocation(), session);

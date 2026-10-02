@@ -43,11 +43,10 @@ import java.util.logging.Logger;
 public class DragonCombatListener implements Listener {
 
     private final BattleSessionManager sessionManager;
-    private final Logger logger;
 
     public DragonCombatListener(BattleSessionManager sessionManager, Logger logger) {
         this.sessionManager = Objects.requireNonNull(sessionManager, "sessionManager no puede ser nulo");
-        this.logger = Objects.requireNonNull(logger, "logger no puede ser nulo");
+        Objects.requireNonNull(logger, "logger no puede ser nulo");
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)

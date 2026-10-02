@@ -14,8 +14,6 @@ import maurxp.betterdragon.arena.ArenaDefinition;
 import maurxp.betterdragon.util.CancellableTask;
 import maurxp.betterdragon.util.DelayedTaskScheduler;
 import org.bukkit.Location;
-import org.bukkit.Particle;
-import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.entity.EnderDragon;
 import org.bukkit.entity.Player;

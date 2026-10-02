@@ -41,6 +41,13 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class BattleVictoryTest {
 
+    private static class DummyItemStack extends ItemStack {
+        protected DummyItemStack() {
+            super();
+        }
+    }
+
+
     private BattleSessionManager sessionManager;
     private ConfigurationService configService;
     private Logger logger;
@@ -461,7 +468,7 @@ class BattleVictoryTest {
 
         EnderDragon vanillaDragon = createPlainDragon(UUID.randomUUID());
         List<ItemStack> drops = new ArrayList<>();
-        ((List<Object>) (List<?>) drops).add(new Object());
+        drops.add(new DummyItemStack());
         EntityDeathEvent deathEvent = new EntityDeathEvent(vanillaDragon, createFakeDamageSource(), drops, 12000);
 
         Optional<BattleResult> resultOpt = battleManager.handleDragonDeath(vanillaDragon, deathEvent);
@@ -481,7 +488,7 @@ class BattleVictoryTest {
         EnderDragon dragon = createFakeDragon(identity.entityUniqueId(), identity.battleId());
 
         List<ItemStack> drops = new ArrayList<>();
-        ((List<Object>) (List<?>) drops).add(new Object());
+        drops.add(new DummyItemStack());
         EntityDeathEvent deathEvent = new EntityDeathEvent(dragon, createFakeDamageSource(), drops, 12000);
 
         Optional<BattleResult> resultOpt = battleManager.handleDragonDeath(dragon, deathEvent);

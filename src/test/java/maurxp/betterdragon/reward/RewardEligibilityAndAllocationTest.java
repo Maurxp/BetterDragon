@@ -379,13 +379,6 @@ class RewardEligibilityAndAllocationTest {
     @DisplayName("Slayer no elegible no recibe SlayerReward si requiresEligibility es true")
     void testSlayerIneligibleBlockedWhenRequiresEligibilityTrue() {
         UUID p1 = UUID.randomUUID();
-        List<ParticipantSnapshot> participants = List.of(
-                new ParticipantSnapshot(p1, "UnderThreshold", "UnderThreshold", 10.0, 1L, 1L, 100L)
-        );
-        BattleResult result = createResult(participants, p1, "UnderThreshold");
-
-        // min_participation_percent = 50%, pero p1 tiene 100% de la batalla? No, hagamos que p1 tenga 10% y otros un mob
-        // Si p1 tiene 10% de daño total y mínimo es 20%:
         UUID p2 = UUID.randomUUID();
         List<ParticipantSnapshot> multi = List.of(
                 new ParticipantSnapshot(p1, "SlayerWithLowDamage", "SlayerWithLowDamage", 15.0, 1L, 2L, 100L),

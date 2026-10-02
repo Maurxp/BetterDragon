@@ -1,7 +1,6 @@
 package maurxp.betterdragon.ability;
 
 import org.bukkit.Particle;
-import org.bukkit.Sound;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

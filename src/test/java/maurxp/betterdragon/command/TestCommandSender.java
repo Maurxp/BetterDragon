@@ -66,11 +66,13 @@ public class TestCommandSender implements CommandSender {
     }
 
     @Override
+    @SuppressWarnings("deprecation")
     public void sendMessage(UUID sender, String message) {
         messages.add(message);
     }
 
     @Override
+    @SuppressWarnings("deprecation")
     public void sendMessage(UUID sender, String... msgs) {
         sendMessage(msgs);
     }

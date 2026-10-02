@@ -704,7 +704,9 @@ public class BattleSession {
             if (dragon.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH) != null) {
                 maxHealth = dragon.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH).getValue();
             } else {
-                maxHealth = dragon.getMaxHealth();
+                @SuppressWarnings("deprecation")
+                double legacyMaxHealth = dragon.getMaxHealth();
+                maxHealth = legacyMaxHealth;
             }
         } catch (Exception ignored) {
         }

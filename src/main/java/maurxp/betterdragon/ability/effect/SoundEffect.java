@@ -38,13 +38,22 @@ public class SoundEffect implements AbilityEffect {
         float volume = (float) context.ability().getDoubleProperty("volume", DEFAULT_VOLUME);
         float pitch = (float) context.ability().getDoubleProperty("pitch", DEFAULT_PITCH);
 
-        Sound sound;
-        try {
-            sound = Sound.valueOf(soundName.toUpperCase().trim());
-        } catch (IllegalArgumentException e) {
-            sound = Sound.ENTITY_ENDER_DRAGON_GROWL;
-        }
+        Sound sound = resolveSound(soundName);
 
         world.playSound(origin, sound, Math.max(0.1f, volume), Math.clamp(pitch, 0.5f, 2.0f));
+    }
+
+    @SuppressWarnings({"deprecation", "removal"})
+    private Sound resolveSound(String soundName) {
+        try {
+            org.bukkit.NamespacedKey key = org.bukkit.NamespacedKey.fromString(soundName.toLowerCase(java.util.Locale.ROOT));
+            if (key != null && org.bukkit.Bukkit.getServer() != null) {
+                Sound resolved = org.bukkit.Registry.SOUNDS.get(key);
+                return resolved != null ? resolved : Sound.valueOf(soundName.toUpperCase().trim());
+            }
+            return Sound.valueOf(soundName.toUpperCase().trim());
+        } catch (Exception e) {
+            return Sound.ENTITY_ENDER_DRAGON_GROWL;
+        }
     }
 }

@@ -34,11 +34,9 @@ import java.util.logging.Logger;
 public class DragonPresentationListener implements Listener {
 
     private final BattleSessionManager sessionManager;
-    private final Logger logger;
 
     public DragonPresentationListener(BattleSessionManager sessionManager, Logger logger) {
         this.sessionManager = Objects.requireNonNull(sessionManager, "sessionManager no puede ser nulo");
-        this.logger = logger != null ? logger : Logger.getLogger("BetterDragon-Presentation");
     }
 
     /**

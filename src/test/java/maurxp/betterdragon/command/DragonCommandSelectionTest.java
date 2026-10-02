@@ -7,7 +7,6 @@ import maurxp.betterdragon.battle.BattleManager;
 import maurxp.betterdragon.battle.BattleSessionManager;
 import maurxp.betterdragon.battle.DragonSpawner;
 import maurxp.betterdragon.command.subcommand.StartSubCommand;
-import maurxp.betterdragon.command.subcommand.StatusSubCommand;
 import maurxp.betterdragon.config.*;
 import maurxp.betterdragon.phase.PhaseDefinition;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,7 +29,6 @@ class DragonCommandSelectionTest {
     private BattleAdminService battleAdminService;
     private ArenaQueryService arenaQueryService;
     private StartSubCommand startCommand;
-    private StatusSubCommand statusCommand;
 
     @BeforeEach
     void setUp() {
@@ -65,7 +63,6 @@ class DragonCommandSelectionTest {
         arenaQueryService = new ArenaQueryService(configService);
 
         startCommand = new StartSubCommand(battleAdminService, arenaQueryService);
-        statusCommand = new StatusSubCommand(battleAdminService);
     }
 
     @Test

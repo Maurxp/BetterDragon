@@ -81,7 +81,6 @@ class DragonCombatListenerTest {
     @Test
     @DisplayName("6. resolveDamagingPlayer retorna null si el tirador no es Player")
     void testResolveProjectileNonPlayerShooterReturnsNull() {
-        Entity skeletonShooter = createFakeEntity(UUID.randomUUID());
         Projectile arrow = createFakeProjectile((ProjectileSource) Proxy.newProxyInstance(
                 ProjectileSource.class.getClassLoader(),
                 new Class<?>[]{ProjectileSource.class},

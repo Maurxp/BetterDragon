@@ -3,8 +3,6 @@ package maurxp.betterdragon.ability;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
 
-import java.util.Objects;
-
 /**
  * Definición inmutable y tipada del aviso telegrafiado previo a una habilidad de combate.
  * <p>
@@ -79,6 +77,7 @@ public record TelegraphDefinition(
     /**
      * Constructor de conveniencia aceptando instancia Sound de Bukkit/Paper.
      */
+    @SuppressWarnings({"deprecation", "removal"})
     public TelegraphDefinition(long durationTicks, Particle particle, int particleCount,
                                double particleRadius, Sound sound, float soundVolume, float soundPitch) {
         this(durationTicks, particle, particleCount, particleRadius,
@@ -101,11 +100,16 @@ public record TelegraphDefinition(
                 DEFAULT_PARTICLE_RADIUS, DEFAULT_SOUND, DEFAULT_VOLUME, DEFAULT_PITCH);
     }
 
-    /**
-     * Resuelve de forma segura el valor {@link Sound} de Bukkit/Paper si es reconocido.
-     */
+    @SuppressWarnings({"deprecation", "removal"})
     public Sound resolveSound() {
         try {
+            org.bukkit.NamespacedKey key = org.bukkit.NamespacedKey.fromString(sound.toLowerCase(java.util.Locale.ROOT));
+            if (key != null && org.bukkit.Bukkit.getServer() != null) {
+                Sound resolved = org.bukkit.Registry.SOUNDS.get(key);
+                if (resolved != null) {
+                    return resolved;
+                }
+            }
             return Sound.valueOf(sound.toUpperCase().trim());
         } catch (Exception e) {
             return null;

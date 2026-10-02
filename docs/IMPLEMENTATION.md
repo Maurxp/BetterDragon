@@ -36,6 +36,8 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 | **3.15 / 3.15-R1 / 3.15-R2 / 3.15-R3** | **Advanced Combat Abilities & Production Hardening** | Bombardeo aéreo de TNT (`CARPET_BOMB`), Onda expansiva de aterrizaje (`SHOCKWAVE`), Contrataques reactivos con cooldown individual (`ON_DAMAGE`), Invocación de minions (`SUMMON`) con 4 firmas PDC y limpieza determinista, Telegrafiado sensorial previo declarativo (`TelegraphDefinition`), Protección de terreno en explosiones BetterDragon, Snapshot isolation total, purga integral de test hooks en `BetterDragonPlugin.java` (-1115 líneas de test residue), 447 tests unitarios/integración, empaquetado de producción limpio. | `COMPLETE` |
 | **3.16** | **Anti-Cheese Gameplay & Arena Control** | Política centralizada de explosiones (`ExplosionPolicy` [ALLOW, BLOCK, PROTECT_ARENA]) contra camas y anclas de respawn, control de agua (`WaterPolicy`), control perimetral (`BoundaryPolicy` [INSIDE, NEAR_BOUNDARY, OUTSIDE]), sistema de retorno seguro `Void Tether` (4 niveles prioritarios, rescate de vacío, debounce 1s, aislamiento de batallas), 485 tests automatizados (0 fallos, 0 errores), 0% NMS. | `COMPLETE` |
 | **3.16-R1** | **Hardening Anti-Cheese & Documentación** | Hardening integral de ExplosionPolicy (PDC check para BETTERDRAGON_ABILITY en BLOCK, exención de EnderCrystal), preservación de orientación yaw/pitch en retorno seguro, cálculo de fallback Tier 4 referenciado al centro de arena, clamping seguro con inset proporcional, limpieza determinista de VoidTetherService en victoria, suite anti-regresión documental, 499 tests unitarios e integrados (0 fallos, 0 errores). | `COMPLETE` |
+| **3.17-R0** | **Auditoría de Calidad, Deuda Técnica & Readiness** | Revisión integral de calidad de código, saneamiento de imports y campos sin uso, resolución segura de deprecaciones de sonido/APIs en Paper 26.1.2-74, diagnóstico de la capa de aplicación y preparación para pruebas in-game. | `COMPLETE` |
+| **3.17-R1** | **Revisión Específica de Warnings Residuales y Suppressions** | Auditoría focalizada en suppressions y APIs forRemoval=true bajo OpenJDK 25, reducción de alcance de supresiones en SoundEffect y ShockwaveEffect a métodos privados, aislamiento de fallbacks legacy y purga de test harness no utilizado. | `COMPLETE` |
 
 ---
 
@@ -598,3 +600,63 @@ El desarrollo avanza exclusivamente por subfases incrementales. Cada subfase pro
 - **Calidad, Pruebas y Validación:**
   - 499 tests unitarios e integrados automatizados ejecutados en Maven (`BUILD SUCCESS`, 0 fallos, 0 errores, 0 omitidos).
   - Verificación de empaquetado de producción sombreado limpio, sin residuos de pruebas ni harnesses.
+
+---
+
+## 16. Estado de la Fase 3.17-R0 (Auditoría de Calidad, Deuda Técnica & Product Readiness) — `COMPLETE`
+
+- **Revisión Integral de Calidad y Deuda Técnica:**
+  - Diagnóstico exhaustivo de calidad y análisis de warnings en compilador Paper 26.1.2-74 sobre OpenJDK 25.
+  - Saneamiento y eliminación de imports muertos en clases del plugin y de tests (incluyendo `TelegraphDefinition.java` y `ArenaRuleSet.java`).
+  - Eliminación de campos y variables no utilizados, limpieza de código muerto y revisión de la suite de pruebas automatizadas.
+  - Mitigación integral de advertencias de deprecación y remoción en llamadas de audio (`Sound.valueOf(String)`) y enums (`OldEnum.name()`), implementando un patrón de resolución dual que consulta prioritariamente `Registry.SOUNDS` cuando el servidor Bukkit está activo, respaldado por un fallback de compatibilidad legado para identificadores históricos y ejecuciones headless.
+  - Encapsulación segura de llamada legacy a `Damageable.getMaxHealth()` en `BattleSession.java`.
+  - Reducción del alcance de suppressions cuando fue factible, preservando de manera rigurosa el comportamiento funcional y las mecánicas del plugin.
+- **Auditoría de GUIs y Capa de Aplicación:**
+  - Confirmación formal de la ausencia de interfaces gráficas de cofre directas en el código actual.
+  - Verificación de la Capa de Aplicación (`maurxp.betterdragon.application.*`) como arquitectura desacoplada y lista para ser consumida de forma nativa por futuras interfaces GUI o comandos administrativos sin duplicación de lógica de negocio.
+- **Preparación para Pruebas In-Game:**
+  - Verificación de precondiciones y procedimientos operativos para despliegue y combate en entornos de producción Paper 26.1.2-74.
+  - Validación del artefacto sombreado (*shaded JAR*), asegurando la inclusión del runtime SQLite y la exclusión absoluta de clases o arneses de test.
+- **Métricas de Compilación y Validación:**
+  - 0 warnings de compilación relevantes en `src/main/java` y `src/test/java`.
+  - Suite de 499 tests automatizados ejecutada exitosamente (`BUILD SUCCESS`, 0 fallos, 0 errores, 0 omitidos).
+
+---
+
+## 17. Estado de la Fase 3.17-R1 (Revisión Específica de Warnings Residuales y Suppressions) — `COMPLETE`
+
+- **Objetivo y Contexto:**
+  - Auditoría técnica focalizada para analizar y depurar warnings residuales detectados en IDEs (como Eclipse JDT / VS Code Java) respecto a anotaciones `@SuppressWarnings` aparentemente redundantes y campos sin uso en pruebas.
+  - Análisis de las discrepancias semánticas entre los linters de IDEs y el compilador estándar `javac` bajo OpenJDK 25 y Paper API 26.1.2-74.
+- **Determinaciones Técnicas por Archivo:**
+  - **`TelegraphDefinition.java`:**
+    - Se revisaron las suppressions `@SuppressWarnings({"deprecation", "removal"})` presentes en el constructor de conveniencia y en el método de resolución sonora.
+    - Se determinó que las llamadas a `OldEnum.name()` y `Sound.valueOf(String)` están explícitamente marcadas como `@Deprecated(forRemoval=true)` en la API de Paper 26.1.2.
+    - Bajo `javac` de OpenJDK 25, `@SuppressWarnings("deprecation")` no suprime advertencias de elementos marcados para remoción; el token `"removal"` es técnicamente obligatorio para evitar que el compilador emita warnings. Las suppressions se conservan estrictamente en estos dos puntos con el menor ámbito necesario.
+  - **`SoundEffect.java`:**
+    - La supresión `@SuppressWarnings({"deprecation", "removal"})` se encontraba colocada a nivel del método público `@Override public void execute(AbilityExecutionContext context)`, cubriendo indebidamente toda la lógica de cálculo espacial de volumen y pitch.
+    - Se refactorizó aislando la llamada legacy a `Sound.valueOf(...)` dentro de un método privado dedicado (`resolveSound(String)`), el cual encapsula la supresión de remoción. El método principal `execute(...)` quedó 100% limpio de anotaciones de supresión sin alterar el fallback a `Sound.ENTITY_ENDER_DRAGON_GROWL`.
+  - **`ShockwaveEffect.java`:**
+    - Siguiendo la misma filosofía, se retiró la supresión `@SuppressWarnings({"deprecation", "removal"})` que cubría todo el método público `execute(...)` (95 líneas que gestionan la lógica de combate, filtrado geométrico, vectores de empuje, knockback vertical y daño físico).
+    - La resolución legacy de audio se aisló en un método privado dedicado (`resolveSound(String)`), manteniendo la supresión exclusivamente donde es técnicamente indispensable y preservando el fallback a `Sound.ENTITY_WARDEN_SONIC_BOOM`.
+  - **`ConfigurationLoader.java`:**
+    - Se evaluó la supresión `@SuppressWarnings({"deprecation", "removal"})` asignada a la variable local `Sound legacy`.
+    - Se determinó conservarla en su ámbito mínimo actual (una sola línea de código). Esta llamada es funcionalmente necesaria durante la carga de YAML para resolver identificadores sonoros heredados y para asegurar que las pruebas unitarias headless (`AbilityConfigurationLoaderTest`) puedan validar el manejo de sonidos inválidos cuando `Bukkit.getServer() == null`.
+  - **`TestCommandSender.java`:**
+    - Se analizó la supresión `@SuppressWarnings("deprecation")` en los métodos sobreescritos `sendMessage(UUID, String)` y `sendMessage(UUID, String...)`.
+    - La supresión debe permanecer obligatoriamente porque dichos métodos provienen de la interfaz `CommandSender` de Paper, donde están marcados como `@Deprecated`. En la compilación con `javac` (Maven/CI), sobreescribir métodos deprecados de una interfaz genera warnings obligatorios de deprecación si no están suprimidos; no se trata de una supresión arbitraria sino de una consecuencia de la API que se está implementando.
+  - **`DragonExplosionListenerTest.java`:**
+    - Se identificaron los campos `sessionManager` y `session` como remanentes del esqueleto inicial del arnés de pruebas.
+    - Dado que `DragonExplosionListener` es un componente stateless que opera exclusivamente sobre PDC sin consultar la sesión activa de batalla, ambos campos carecían de uso real en las aserciones y ejecuciones.
+    - Se eliminaron de forma segura los campos, su instanciación en `@BeforeEach` y los imports huérfanos asociados (`BattleSession`, `BattleSessionManager`), manteniendo la integridad de las pruebas.
+- **Resultados Finales de Validación:**
+  - **Compilación Maven (`javac -Xlint:all` sobre OpenJDK 25):** 0 warnings de compilación relevantes en el build del proyecto.
+  - **Suite de Pruebas Automatizadas (`mvn clean test`):**
+    - 499 tests ejecutados.
+    - 0 fallos (`failures`).
+    - 0 errores (`errors`).
+    - 0 omitidos (`skipped`).
+    - Resultado: `BUILD SUCCESS`.
+  - **Verificación de Formato y Control de Versiones:**
+    - `git diff --check` completamente limpio (0 errores de espacios o formato).

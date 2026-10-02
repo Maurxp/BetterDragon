@@ -60,12 +60,7 @@ public class ShockwaveEffect implements AbilityEffect {
                 particle = Particle.SONIC_BOOM;
             }
 
-            Sound sound;
-            try {
-                sound = Sound.valueOf(soundName.toUpperCase().trim());
-            } catch (Exception e) {
-                sound = Sound.ENTITY_WARDEN_SONIC_BOOM;
-            }
+            Sound sound = resolveSound(soundName);
 
             world.spawnParticle(particle, origin, 1, 0.0, 0.0, 0.0, 0.0);
             world.playSound(origin, sound, 2.0f, 1.0f);
@@ -120,6 +115,20 @@ public class ShockwaveEffect implements AbilityEffect {
                 } catch (Exception ignored) {
                 }
             }
+        }
+    }
+
+    @SuppressWarnings({"deprecation", "removal"})
+    private Sound resolveSound(String soundName) {
+        try {
+            org.bukkit.NamespacedKey key = org.bukkit.NamespacedKey.fromString(soundName.toLowerCase(java.util.Locale.ROOT));
+            if (key != null && org.bukkit.Bukkit.getServer() != null) {
+                Sound resolved = org.bukkit.Registry.SOUNDS.get(key);
+                return resolved != null ? resolved : Sound.valueOf(soundName.toUpperCase().trim());
+            }
+            return Sound.valueOf(soundName.toUpperCase().trim());
+        } catch (Exception e) {
+            return Sound.ENTITY_WARDEN_SONIC_BOOM;
         }
     }
 }

@@ -1,14 +1,10 @@
 package maurxp.betterdragon.combat;
 
-import maurxp.betterdragon.battle.BattleSession;
-import maurxp.betterdragon.battle.BattleSessionManager;
 import maurxp.betterdragon.battle.model.BattleId;
 import maurxp.betterdragon.util.BetterDragonKeys;
 import org.bukkit.Location;
-import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
-import org.bukkit.entity.TNTPrimed;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
@@ -18,7 +14,6 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Proxy;
 import java.util.*;
-import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -29,16 +24,13 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class DragonExplosionListenerTest {
 
-    private BattleSessionManager sessionManager;
     private DragonExplosionListener listener;
-    private BattleSession session;
     private BattleId battleId;
 
     @BeforeEach
     void setUp() {
         listener = new DragonExplosionListener();
         battleId = BattleId.random();
-        session = BattleSession.create(battleId, "world_the_end", UUID.randomUUID());
     }
 
     @Test

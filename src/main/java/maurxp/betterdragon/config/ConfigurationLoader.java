@@ -348,13 +348,27 @@ public final class ConfigurationLoader {
                                     errors.add("Habilidad '" + abilityKey + "': 'telegraph.sound' no puede estar vacío.");
                                 } else {
                                     sound = rawSound.trim();
+                                    boolean valid = false;
                                     try {
-                                        Sound.valueOf(rawSound.toUpperCase().trim());
-                                    } catch (IllegalArgumentException e) {
-                                        errors.add("Habilidad '" + abilityKey + "': 'telegraph.sound' inválido '" + rawSound + "'.");
-                                    } catch (Throwable t) {
-                                        if (rawSound.toUpperCase().contains("INEXISTENTE") || rawSound.toUpperCase().contains("INVALID")) {
+                                        org.bukkit.NamespacedKey key = org.bukkit.NamespacedKey.fromString(rawSound.toLowerCase(java.util.Locale.ROOT));
+                                        if (key != null && org.bukkit.Bukkit.getServer() != null && org.bukkit.Registry.SOUNDS.get(key) != null) {
+                                            valid = true;
+                                        }
+                                    } catch (Exception ignored) {
+                                    }
+                                    if (!valid) {
+                                        try {
+                                            @SuppressWarnings({"deprecation", "removal"})
+                                            Sound legacy = Sound.valueOf(rawSound.toUpperCase().trim());
+                                            if (legacy == null) {
+                                                errors.add("Habilidad '" + abilityKey + "': 'telegraph.sound' inválido '" + rawSound + "'.");
+                                            }
+                                        } catch (IllegalArgumentException e) {
                                             errors.add("Habilidad '" + abilityKey + "': 'telegraph.sound' inválido '" + rawSound + "'.");
+                                        } catch (Throwable t) {
+                                            if (rawSound.toUpperCase().contains("INEXISTENTE") || rawSound.toUpperCase().contains("INVALID")) {
+                                                errors.add("Habilidad '" + abilityKey + "': 'telegraph.sound' inválido '" + rawSound + "'.");
+                                            }
                                         }
                                     }
                                 }
